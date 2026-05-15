@@ -1,0 +1,47 @@
+# Veritas-R1 training artefacts — do NOT commit any of these.
+
+# Adapter checkpoints (LoRA / DoRA weights)
+out/
+checkpoints/
+
+# Eval scoreboards & ablation results — preserve summary CSVs in `results/`
+# but ignore raw rollouts and per-task json blobs.
+results/raw/
+results/rollouts/
+
+# Compiled data shards (parquet / arrow) — regenerable from CP3/CP4/CP5
+data/sft/
+data/dpo/
+data/preferences/
+data/seed/
+*.parquet
+*.arrow
+
+# WandB run state
+wandb/
+
+# vLLM cache & model snapshots
+.cache/
+models/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.tox/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Modal local state
+.modal.toml.lock
+
+# Secrets — never commit
+.env
+.env.local
+*.key
+*.pem
+service-account*.json

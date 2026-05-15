@@ -1,0 +1,122 @@
+{
+  "episodes": [
+    {
+      "id": "epi-glp1-mortality",
+      "projectId": "proj-clinical",
+      "userId": "user-rakshit",
+      "timestamp": "2026-04-20T10:00:00.000Z",
+      "type": "query",
+      "input": "Do GLP-1 agonists reduce mortality in T2DM?",
+      "thoughtTrace": {
+        "steps": [
+          {
+            "kind": "think",
+            "text": "User is asking about GLP-1 mortality. I should pull prior project claims first.",
+            "index": 0
+          },
+          {
+            "kind": "recall",
+            "text": "GLP-1 mortality T2DM",
+            "recalledClaims": ["clm-glp1", "clm-sglt2"],
+            "recalledEpisodes": [],
+            "index": 1
+          },
+          {
+            "kind": "think",
+            "text": "Two prior claims found. Need a fresh DOI verification before citing.",
+            "index": 2
+          },
+          {
+            "kind": "retrieve",
+            "tool": "retrieve",
+            "toolInput": { "query": "GLP-1 agonists mortality T2DM", "limit": 5 },
+            "toolOutput": { "hits": [{ "doi": "10.1234/foo", "title": "GLP-1 RCT" }] },
+            "index": 3
+          },
+          {
+            "kind": "verify_citation",
+            "tool": "verify_citation",
+            "toolInput": { "doi": "10.1234/foo" },
+            "toolOutput": { "resolved": true, "journal": "NEJM" },
+            "index": 4
+          },
+          {
+            "kind": "answer",
+            "text": "GLP-1 agonists reduce all-cause mortality in T2DM patients (NEJM, doi:10.1234/foo). Contact me at noone@example.com.",
+            "index": 5
+          }
+        ]
+      },
+      "output": "GLP-1 agonists reduce all-cause mortality in T2DM patients (NEJM, doi:10.1234/foo). Contact me at noone@example.com.",
+      "claimsReferenced": ["clm-glp1", "clm-sglt2"],
+      "claimsCreated": [],
+      "claimsRetired": [],
+      "contradictionIds": []
+    },
+    {
+      "id": "epi-quick-chat",
+      "projectId": "proj-clinical",
+      "userId": "user-rakshit",
+      "timestamp": "2026-04-21T11:30:00.000Z",
+      "type": "query",
+      "input": "What's the deadline for the manuscript?",
+      "output": "Your project notes show the deadline as April 30. My phone is 415-555-1234.",
+      "claimsReferenced": [],
+      "claimsCreated": [],
+      "claimsRetired": [],
+      "contradictionIds": []
+    },
+    {
+      "id": "epi-malformed-empty",
+      "projectId": "proj-clinical",
+      "userId": "user-rakshit",
+      "timestamp": "2026-04-22T09:00:00.000Z",
+      "type": "query",
+      "input": "",
+      "claimsReferenced": [],
+      "claimsCreated": [],
+      "claimsRetired": [],
+      "contradictionIds": []
+    }
+  ],
+  "claims": [
+    {
+      "id": "clm-glp1",
+      "projectId": "proj-clinical",
+      "userId": "user-rakshit",
+      "atomicAssertion": "GLP-1 agonists reduce all-cause mortality in T2DM patients.",
+      "canonicalHash": "abc123",
+      "polarity": "asserts",
+      "assertiveness": "direct",
+      "extractorCertainty": "high",
+      "sourceSupport": "strong",
+      "scope": {},
+      "attributions": [],
+      "entities": [],
+      "contradicts": [],
+      "supersedes": [],
+      "retired": false,
+      "createdAt": "2026-04-15T00:00:00.000Z",
+      "updatedAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "id": "clm-sglt2",
+      "projectId": "proj-clinical",
+      "userId": "user-rakshit",
+      "atomicAssertion": "SGLT2 inhibitors reduce hospitalisation for heart failure.",
+      "canonicalHash": "def456",
+      "polarity": "asserts",
+      "assertiveness": "direct",
+      "extractorCertainty": "high",
+      "sourceSupport": "strong",
+      "scope": {},
+      "attributions": [],
+      "entities": [],
+      "contradicts": [],
+      "supersedes": [],
+      "retired": false,
+      "createdAt": "2026-04-15T00:00:00.000Z",
+      "updatedAt": "2026-04-15T00:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,405 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ────────────────────────────────────────────────────────────
+    // Core app collections
+    // ────────────────────────────────────────────────────────────
+
+    // Users — owner can read/write their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // Projects — only the owner can CRUD
+    match /projects/{projectId} {
+      allow read:           if request.auth != null
+                            && request.auth.uid == resource.data.userId;
+      allow create:         if request.auth != null
+                            && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if request.auth != null
+                            && request.auth.uid == resource.data.userId;
+    }
+
+    // Documents — only the owner can CRUD
+    match /documents/{docId} {
+      allow read:           if request.auth != null
+                            && request.auth.uid == resource.data.userId;
+      allow create:         if request.auth != null
+                            && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if request.auth != null
+                            && request.auth.uid == resource.data.userId;
+    }
+
+    // Research queries — only the owner can read/create
+    match /queries/{queryId} {
+      allow read:   if request.auth != null
+                    && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Teams collection — collaborative workspaces.
+    //
+    // Schema (per `src/lib/firebase/firestore.ts`):
+    //   /teams/{teamId}
+    //     ├ ownerId      (uid of creator; immutable in rules)
+    //     ├ memberIds[]  (denormalised array of every member uid)
+    //     ├ name, description, projectCount, createdAt, updatedAt
+    //     └ /members/{userId} subcollection: {role, email, displayName, joinedAt}
+    //
+    //   /teamInvites/{inviteId}
+    //     ├ teamId, inviterId, email, role, status, createdAt, expiresAt
+    //
+    // Access model:
+    //   - Read team   : member only (uid ∈ memberIds[])
+    //   - Create team : authenticated, caller IS ownerId AND IS in memberIds[]
+    //                   AND memberIds.size() == 1 (only seed self)
+    //   - Update team : owner does anything; non-owners can ONLY add their own uid
+    //                   to memberIds (invite acceptance) AND must touch only the
+    //                   memberIds + updatedAt fields
+    //   - Delete team : owner only
+    //
+    //   - Members subcoll
+    //       read   : team members only
+    //       create : caller adds *their own* row, OR owner adds anyone
+    //       update : caller updates non-role fields on their own row, OR owner
+    //                changes any field on any row
+    //       delete : self-leave (uid == userId), OR owner removes anyone
+    //
+    //   - Invites
+    //       read   : inviter OR recipient-by-email (email match in resource data)
+    //       create : authenticated; inviterId must == auth.uid
+    //       update : inviter (revoke) OR recipient marking pending → accepted
+    //       delete : inviter only
+    //
+    // Notes on least privilege:
+    //   - Invite acceptance is the only multi-collection mutation a non-owner can
+    //     perform; the SDK's `acceptTeamInvite` checks invite validity in a
+    //     transaction before any writes. Rules constrain the *shape* of those
+    //     writes (only add self to memberIds, only mark pending → accepted).
+    //   - Email match on invites uses `request.auth.token.email` rather than a
+    //     wide read — that closes the "any logged-in user can read any invite"
+    //     gap in the previous draft.
+    // ────────────────────────────────────────────────────────────
+
+    function isTeamMember(teamId) {
+      return request.auth != null
+             && request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+    }
+
+    function isTeamOwner(teamId) {
+      return request.auth != null
+             && request.auth.uid == get(/databases/$(database)/documents/teams/$(teamId)).data.ownerId;
+    }
+
+    match /teams/{teamId} {
+      allow read: if request.auth != null
+                  && request.auth.uid in resource.data.memberIds;
+
+      allow create: if request.auth != null
+                    && request.resource.data.ownerId == request.auth.uid
+                    && request.auth.uid in request.resource.data.memberIds
+                    && request.resource.data.memberIds.size() == 1;
+
+      // Owner has full update; non-owner can ONLY add self to memberIds with
+      // no other field touched (other than updatedAt). This is the
+      // invite-acceptance carve-out.
+      allow update: if request.auth != null
+                    && (
+                      request.auth.uid == resource.data.ownerId
+                      || (
+                        // Self-add to memberIds during invite acceptance
+                        request.auth.uid in request.resource.data.memberIds
+                        && !(request.auth.uid in resource.data.memberIds)
+                        && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'updatedAt'])
+                      )
+                    );
+
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.ownerId;
+
+      // Members subcollection
+      match /members/{userId} {
+        allow read: if isTeamMember(teamId);
+
+        // Self-add OR owner-add. On create the caller's uid must match the
+        // doc id when self-adding (prevents impersonation).
+        allow create: if request.auth != null
+                      && (
+                        request.auth.uid == userId
+                        || isTeamOwner(teamId)
+                      );
+
+        // Self can update non-role fields; owner can update anything.
+        allow update: if request.auth != null
+                      && (
+                        (request.auth.uid == userId
+                          && request.resource.data.role == resource.data.role
+                          && request.resource.data.userId == resource.data.userId)
+                        || isTeamOwner(teamId)
+                      );
+
+        // Self-leave OR owner-removes.
+        allow delete: if request.auth != null
+                      && (
+                        request.auth.uid == userId
+                        || isTeamOwner(teamId)
+                      );
+      }
+    }
+
+    // Team invites — pending invitations sent by email.
+    match /teamInvites/{inviteId} {
+      // Inviter can read; recipient can read if their auth email matches.
+      allow read: if request.auth != null
+                  && (
+                    request.auth.uid == resource.data.inviterId
+                    || (
+                      request.auth.token.email != null
+                      && request.auth.token.email.lower() == resource.data.email
+                    )
+                  );
+
+      allow create: if request.auth != null
+                    && request.resource.data.inviterId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // Inviter can revoke; recipient can mark pending → accepted (and only
+      // those fields change). This is the carve-out for `acceptTeamInvite`.
+      allow update: if request.auth != null
+                    && (
+                      request.auth.uid == resource.data.inviterId
+                      || (
+                        request.auth.token.email != null
+                        && request.auth.token.email.lower() == resource.data.email
+                        && resource.data.status == 'pending'
+                        && request.resource.data.status == 'accepted'
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'acceptedBy'])
+                      )
+                    );
+
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.inviterId;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Veritas memory collections (Phase 1)
+    //
+    // Every doc carries a denormalised `ownerId` == user uid. That lets
+    // rules check ownership in O(1) without `get()` traversals, matching
+    // the pattern used by `projects` / `documents` above (`userId`).
+    //
+    // We additionally require `projectId` to be present on every write so
+    // the adapters can query by project without scanning the whole
+    // collection. The Firestore adapter in `src/lib/veritas/memory/firestore`
+    // enforces both fields on write.
+    //
+    // Episodes use `userId` (first-class schema field) instead of `ownerId`
+    // because the domain already carries the author. Rules accept that shape.
+    // ────────────────────────────────────────────────────────────
+
+    function veritasCreate() {
+      return request.auth != null
+             && request.resource.data.ownerId == request.auth.uid
+             && request.resource.data.projectId is string;
+    }
+
+    function veritasAccess() {
+      return request.auth != null
+             && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Claims
+    match /veritasClaims/{claimId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Claim links (graph edges)
+    match /veritasClaimLinks/{linkId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Contradictions (lifecycle-tracked)
+    match /veritasContradictions/{contradictionId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Episodes — rule uses `ownerId` denormalised by the adapter; the
+    // first-class `userId` field remains for audit trail / training data.
+    match /veritasEpisodes/{episodeId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Entities (resolved concept / person / etc.)
+    match /veritasEntities/{entityId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Topics (normalised project topic tags)
+    match /veritasTopics/{topicId} {
+      allow read:           if veritasAccess();
+      allow create:         if veritasCreate();
+      allow update, delete: if veritasAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Memory snapshots (append-only point-in-time views)
+    match /veritasSnapshots/{snapshotId} {
+      allow read:   if veritasAccess();
+      allow create: if veritasCreate();
+      // Snapshots are immutable — no update/delete path.
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Forge Recall — snippet-based conversational memory.
+    //
+    // Schema (see src/lib/recall/types.ts + docs/RECALL.md):
+    //   /recallSnippets/{id}     — every Snippet, scoped by projectId + ownerId
+    //   /recallCorrections/{id}  — supersedes link between two snippet ids
+    //
+    // Both use the same ownership pattern as the rest of the app:
+    // `ownerId` denormalised on every write; rules check it in O(1).
+    // ────────────────────────────────────────────────────────────
+
+    function recallCreate() {
+      return request.auth != null
+             && request.resource.data.ownerId == request.auth.uid
+             && request.resource.data.projectId is string;
+    }
+
+    function recallAccess() {
+      return request.auth != null
+             && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /recallSnippets/{snippetId} {
+      allow read:           if recallAccess();
+      allow create:         if recallCreate();
+      allow update, delete: if recallAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /recallCorrections/{correctionId} {
+      allow read:           if recallAccess();
+      allow create:         if recallCreate();
+      allow update, delete: if recallAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Research Planner — gap suggestions, accepted plan items,
+    // and per-project learning weights.
+    //
+    // Schema (see src/lib/research-planner/types.ts):
+    //   /researchSuggestions/{id} — surfaced gaps awaiting decision
+    //   /researchPlanItems/{id}   — accepted items the user is working through
+    //   /plannerWeights/{id}      — id = `${projectId}_${ownerId}`; per-kind weights
+    //
+    // Same ownerId-denormalised pattern as the rest of the app.
+    // ────────────────────────────────────────────────────────────
+
+    function plannerCreate() {
+      return request.auth != null
+             && request.resource.data.ownerId == request.auth.uid
+             && request.resource.data.projectId is string;
+    }
+
+    function plannerAccess() {
+      return request.auth != null
+             && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /researchSuggestions/{suggestionId} {
+      allow read:           if plannerAccess();
+      allow create:         if plannerCreate();
+      allow update, delete: if plannerAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /researchPlanItems/{itemId} {
+      allow read:           if plannerAccess();
+      allow create:         if plannerCreate();
+      allow update, delete: if plannerAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // plannerWeights is upserted by both the scan worker and the
+    // accept/dismiss handlers. Allow both create and update on the
+    // same path; both must carry ownerId.
+    match /plannerWeights/{weightsId} {
+      allow read:   if plannerAccess();
+      allow create: if plannerCreate();
+      allow update: if plannerAccess()
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if plannerAccess();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Counterforge — adversarial review engine.
+    //
+    // Schema (see src/lib/counterforge/types.ts):
+    //   /counterforgeCases/{id}     — one claim ↔ counter-case
+    //   /counterforgeSettings/{id}  — id = `${projectId}_${ownerId}`
+    //
+    // Same ownership pattern as everything else: denormalised
+    // `ownerId` checked O(1) at the rule level.
+    // ────────────────────────────────────────────────────────────
+
+    function cfCreate() {
+      return request.auth != null
+             && request.resource.data.ownerId == request.auth.uid
+             && request.resource.data.projectId is string;
+    }
+
+    function cfAccess() {
+      return request.auth != null
+             && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /counterforgeCases/{caseId} {
+      allow read:           if cfAccess();
+      allow create:         if cfCreate();
+      allow update, delete: if cfAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /counterforgeSettings/{settingsId} {
+      allow read:   if cfAccess();
+      allow create: if cfCreate();
+      allow update: if cfAccess()
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if cfAccess();
+    }
+  }
+}

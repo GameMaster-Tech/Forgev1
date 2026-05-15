@@ -1,0 +1,212 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "projects",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // ─────────────────────────────────────────────────────────────
+    // Veritas — claims
+    // listClaims(): projectId + retired? + updatedAt DESC
+    // listByTopic(): projectId + topicId + retired
+    // listByEntity(): projectId + entities(array-contains) + retired
+    // getByHash(): projectId + canonicalHash
+    // ─────────────────────────────────────────────────────────────
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "retired", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "canonicalHash", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "topicId", "order": "ASCENDING" },
+        { "fieldPath": "retired", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "retired", "order": "ASCENDING" },
+        { "fieldPath": "entities", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    // Retire-cascade lookup: find descendants whose
+    // `derivation.parentClaimIds` contains a retired/superseded claim id.
+    // Phase 2 — drives `cascadeNeedsReviewOnDescendants` in the Firestore
+    // claim-graph adapter.
+    {
+      "collectionGroup": "veritasClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "derivation.parentClaimIds", "arrayConfig": "CONTAINS" }
+      ]
+    },
+
+    // ─────────────────────────────────────────────────────────────
+    // Veritas — claim links
+    // linksFrom(id): projectId + from
+    // linksTo(id):   projectId + to
+    // ─────────────────────────────────────────────────────────────
+    {
+      "collectionGroup": "veritasClaimLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "from", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasClaimLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "to", "order": "ASCENDING" }
+      ]
+    },
+
+    // ─────────────────────────────────────────────────────────────
+    // Veritas — contradictions
+    // listContradictions: projectId (+ status?) + detectedAt DESC
+    // contradictionsOf(claimId): two queries, (projectId + a) and (projectId + b)
+    // ─────────────────────────────────────────────────────────────
+    {
+      "collectionGroup": "veritasContradictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "detectedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasContradictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "detectedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasContradictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "a", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasContradictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "b", "order": "ASCENDING" }
+      ]
+    },
+
+    // ─────────────────────────────────────────────────────────────
+    // Veritas — episodes
+    // list/export: projectId + timestamp ASC
+    // recent(k):   projectId + timestamp DESC
+    // ofType:      projectId + type + timestamp
+    // forClaim:    three array-contains queries against claimsReferenced /
+    //              claimsCreated / claimsRetired
+    // ─────────────────────────────────────────────────────────────
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "claimsReferenced", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "claimsCreated", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "veritasEpisodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "claimsRetired", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

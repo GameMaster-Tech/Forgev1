@@ -1,0 +1,84 @@
+# Veritas-R1 — base training config (CP1).
+#
+# Every CP-specific config (sft.yaml, grpo.yaml, dpo.yaml, distill.yaml)
+# inherits from this file. A child config never restates a value that
+# matches the base — only overrides go in the child file.
+#
+# Do NOT edit values here without updating `docs/VERITAS_TRAINING_PLAN_V2.md` —
+# this file is the runtime reflection of the locked decision in §1-§2 of
+# that doc. Drift between this file and the plan is the most common cause
+# of "the model trained but doesn't behave like the plan said it would."
+
+model:
+  # Picked in CP1 (see VERITAS_TRAINING_PLAN_V2.md §1).
+  # Do NOT swap without re-running the model-comparison table.
+  base_id: "Qwen/Qwen3-14B"
+  # Native 128K context — we train at 16K, serve at 128K via the model's
+  # built-in YaRN scaling (already in Qwen3 config.json, no override needed).
+  train_max_seq_len: 16384
+  serve_max_seq_len: 131072
+  # Dual-mode chat template flag. Stage-1 SFT trains on a 50/50 mix of
+  # `enable_thinking=true` and `=false` examples so the model learns both modes.
+  enable_thinking_default: true
+
+tokenizer:
+  pad_to_multiple_of: 64
+  # Pad token must NEVER be EOS (or the loss-mask collapses on the final turn).
+  use_distinct_pad_token: true
+
+peft:
+  # QLoRA — see plan §2 Stage 1. r=64/α=128 is the sweet spot at 14B for
+  # the founder budget; r=128 is +30% time for marginal eval gain on the
+  # ForgeBench-Reason scoreboard (validated on the seed dataset).
+  type: "qlora"
+  r: 64
+  alpha: 128
+  dropout: 0.05
+  bias: "none"
+  target_modules:  # all-linear coverage — safer than attention-only for SFT-then-RL
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+quantisation:
+  # 4-bit NF4 base under the LoRA adapter.
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: "bfloat16"
+
+precision:
+  # bf16 master dtype throughout. fp16 leads to instabilities on Qwen3 at 14B.
+  dtype: "bfloat16"
+  use_liger_kernel: true        # fused cross-entropy — saves ~4 GB at 14B
+  use_flash_attention: true     # required by Unsloth 2026.x
+
+training_common:
+  seed: 17
+  gradient_checkpointing: true
+  optim: "adamw_torch_fused"
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  # Batch sizing is per-stage — see sft.yaml / grpo.yaml / dpo.yaml.
+
+logging:
+  report_to: ["wandb"]
+  wandb_project: "veritas-r1"
+  log_dir: "out/logs"
+  save_total_limit: 3
+  save_strategy: "steps"
+  evaluation_strategy: "steps"
+
+paths:
+  # All output dirs are .gitignored. Reproducible artefacts live under `results/`.
+  sft_out: "out/sft-r64"
+  grpo_out: "out/grpo"
+  dpo_out: "out/dpo"
+  distill_out: "out/distill-3b"
+  data_root: "data"
+  results_root: "results"

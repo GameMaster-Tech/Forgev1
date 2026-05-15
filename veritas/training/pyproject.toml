@@ -1,0 +1,80 @@
+[project]
+name = "forge-veritas-training"
+version = "0.1.0"
+description = "Training pipeline for Veritas-R1 — Forge's in-house reasoning + memory model."
+authors = [{ name = "Rakshit Khanna" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+
+# All upper bounds are intentionally loose — Veritas-R1 training pins a
+# specific Unsloth/TRL release at the time each compute checkpoint runs
+# (per `docs/PHASE3_CHECKPOINTS.md`). The version pins move forward only
+# when a checkpoint deliberately bumps them.
+dependencies = [
+  # Core HF
+  "transformers >=4.50.0",
+  "tokenizers >=0.21.0",
+  "datasets >=3.2.0",
+  "accelerate >=1.5.0",
+  "peft >=0.15.0",
+  "safetensors >=0.5.0",
+  "huggingface-hub >=0.30.0",
+
+  # Training algorithms (SFT, DPO, KTO, GRPO)
+  "trl >=0.18.0",
+
+  # Speed + memory
+  "unsloth >=2026.4.0",
+  "liger-kernel >=0.5.0",
+  "bitsandbytes >=0.45.0",
+
+  # Reward functions reach Firestore + DOI verification
+  "firebase-admin >=6.5.0",
+  "httpx >=0.28.0",
+  "pydantic >=2.10.0",
+
+  # Eval transport — VeritasR1BenchRunner speaks OpenAI-compat over HTTP.
+  # vLLM is the production server; we install the python client only here.
+  "openai >=1.65.0",
+
+  # Tracking
+  "wandb >=0.19.0",
+
+  # Data plumbing
+  "pyarrow >=18.0.0",
+  "orjson >=3.10.0",
+  "tqdm >=4.67.0",
+
+  # Sanity: numpy/scipy pinned through transformers — leave unpinned here
+]
+
+[project.optional-dependencies]
+serving = [
+  "vllm >=0.8.0",
+  "modal >=0.74.0",
+]
+dev = [
+  "ruff >=0.9.0",
+  "pytest >=8.3.0",
+  "pytest-asyncio >=0.25.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/forge_veritas"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
