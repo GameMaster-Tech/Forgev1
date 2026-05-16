@@ -178,8 +178,16 @@ function resolveOne(
     edge.from.length > 1 &&
     (edge.kind === "less-than" || edge.kind === "less-than-or-equal" ||
      edge.kind === "greater-than" || edge.kind === "greater-than-or-equal" ||
-     edge.kind === "sum-equals");
+     edge.kind === "sum-equals" || edge.kind === "between" ||
+     edge.kind === "not-equals" || edge.kind === "divisible-by");
   if (isSumConstraint) {
+    const balanced = rebalance(graph, edge, flex);
+    if (balanced) return balanced;
+  }
+
+  // For "between", "not-equals", and "divisible-by", always try rebalance
+  // first; oracles are unlikely to satisfy a numerical band/parity rule.
+  if (edge.kind === "between" || edge.kind === "not-equals" || edge.kind === "divisible-by") {
     const balanced = rebalance(graph, edge, flex);
     if (balanced) return balanced;
   }
@@ -315,6 +323,119 @@ function rebalance(
       rationale: `Raised ${flex.label} to its lower bound (${edge.operand.toLocaleString()}).`,
       confidence: 0.6,
     };
+  }
+
+  /* ── between ── */
+  if (edge.kind === "between") {
+    const lo = edge.lowerBound;
+    const hi = edge.upperBound;
+    const isMultiSource = Array.isArray(edge.from) && edge.from.length > 1;
+    if (isMultiSource && isSumFlex) {
+      const fixedSum = sources
+        .filter((s) => s.id !== flex.id)
+        .reduce((acc, s) => acc + (s.value.type === "number" ? s.value.value : 0), 0);
+      // Aim for the midpoint of the band so future drift in the rest of
+      // the line items stays inside.
+      const mid =
+        lo != null && hi != null ? (lo + hi) / 2 :
+        lo != null ? lo :
+        hi != null ? hi : flex.value.value;
+      const target = Math.max(0, mid - fixedSum);
+      return {
+        assertionId: flex.id,
+        before: flex.value,
+        after: { type: "number", value: target, unit: flex.value.unit },
+        rationale: `Rebalanced ${flex.label} so Σ lands inside [${lo?.toLocaleString() ?? "−∞"}, ${hi?.toLocaleString() ?? "+∞"}].`,
+        confidence: 0.7,
+      };
+    }
+    if (!isMultiSource) {
+      const cur = flex.value.value;
+      let next = cur;
+      if (lo != null && cur < lo) next = lo;
+      else if (hi != null && cur > hi) next = hi;
+      if (next !== cur) {
+        return {
+          assertionId: flex.id,
+          before: flex.value,
+          after: { type: "number", value: Math.max(0, next), unit: flex.value.unit },
+          rationale: `Clamped ${flex.label} into [${lo?.toLocaleString() ?? "−∞"}, ${hi?.toLocaleString() ?? "+∞"}].`,
+          confidence: 0.65,
+        };
+      }
+    }
+  }
+
+  /* ── not-equals ── */
+  if (edge.kind === "not-equals") {
+    const isMultiSource = Array.isArray(edge.from) && edge.from.length > 1;
+    if (isMultiSource && isSumFlex && t.value.type === "number") {
+      const fixedSum = sources
+        .filter((s) => s.id !== flex.id)
+        .reduce((acc, s) => acc + (s.value.type === "number" ? s.value.value : 0), 0);
+      const tValue = t.value.value;
+      const desiredSum = tValue + Math.max(1, Math.abs(tValue) * 0.01);
+      return {
+        assertionId: flex.id,
+        before: flex.value,
+        after: { type: "number", value: Math.max(0, desiredSum - fixedSum), unit: flex.value.unit },
+        rationale: `Bumped ${flex.label} so Σ no longer equals ${t.label}.`,
+        confidence: 0.62,
+      };
+    }
+    const peer = sources.find((s) => s.id !== flex.id) ?? t;
+    if (peer && peer.value.type === "number" && flex.value.type === "number") {
+      const bump = Math.max(1, Math.abs(peer.value.value) * 0.01);
+      const next = flex.value.value === peer.value.value ? flex.value.value + bump : flex.value.value;
+      if (next !== flex.value.value) {
+        return {
+          assertionId: flex.id,
+          before: flex.value,
+          after: { type: "number", value: next, unit: flex.value.unit },
+          rationale: `Adjusted ${flex.label} to avoid colliding with ${peer.label}.`,
+          confidence: 0.6,
+        };
+      }
+    }
+  }
+
+  /* ── divisible-by ── */
+  if (edge.kind === "divisible-by") {
+    const divisor = edge.divisor;
+    if (divisor == null || divisor === 0) return null;
+    const isMultiSource = Array.isArray(edge.from) && edge.from.length > 1;
+    if (isMultiSource && isSumFlex) {
+      const fixedSum = sources
+        .filter((s) => s.id !== flex.id)
+        .reduce((acc, s) => acc + (s.value.type === "number" ? s.value.value : 0), 0);
+      // Nudge flex so the sum is the nearest multiple of |divisor|.
+      const currentSum = fixedSum + flex.value.value;
+      const abs = Math.abs(divisor);
+      const nearest = Math.round(currentSum / abs) * abs;
+      const next = Math.max(0, nearest - fixedSum);
+      if (next !== flex.value.value) {
+        return {
+          assertionId: flex.id,
+          before: flex.value,
+          after: { type: "number", value: next, unit: flex.value.unit },
+          rationale: `Rebalanced ${flex.label} so Σ is divisible by ${divisor.toLocaleString()}.`,
+          confidence: 0.68,
+        };
+      }
+    }
+    if (!isMultiSource) {
+      const abs = Math.abs(divisor);
+      const nearest = Math.round(flex.value.value / abs) * abs;
+      if (nearest !== flex.value.value) {
+        return {
+          assertionId: flex.id,
+          before: flex.value,
+          after: { type: "number", value: Math.max(0, nearest), unit: flex.value.unit },
+          rationale: `Rounded ${flex.label} to the nearest multiple of ${divisor.toLocaleString()}.`,
+          confidence: 0.65,
+        };
+      }
+    }
   }
 
   return null;

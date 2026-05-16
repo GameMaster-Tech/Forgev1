@@ -75,7 +75,10 @@ export type ConstraintKind =
   | "greater-than-or-equal"
   | "implies"
   | "mutex"
-  | "ratio";
+  | "ratio"
+  | "between"
+  | "not-equals"
+  | "divisible-by";
 
 export interface ConstraintEdge {
   id: ConstraintId;
@@ -89,6 +92,12 @@ export interface ConstraintEdge {
   tolerance?: number;
   /** Optional constant operand (e.g. less-than 12 months). */
   operand?: number;
+  /** Optional lower bound; used by `between` (inclusive). */
+  lowerBound?: number;
+  /** Optional upper bound; used by `between` (inclusive). */
+  upperBound?: number;
+  /** Optional divisor; used by `divisible-by`. */
+  divisor?: number;
   /** "hard" violations halt the solver; "soft" let it propose a patch. */
   severity: "hard" | "soft";
   /** Human-readable rationale for the rule. */

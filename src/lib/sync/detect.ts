@@ -150,9 +150,134 @@ export function evaluate(
       return null;
     }
 
+    case "between": {
+      // Value must lie inclusively within [lowerBound, upperBound].
+      // Sum-style (multi-source from): Σ(sources) ∈ [lo, hi].
+      // Single-target: target ∈ [lo, hi].
+      const lo = edge.lowerBound;
+      const hi = edge.upperBound;
+      if (lo == null && hi == null) return null;
+      const isArrayFrom = Array.isArray(edge.from) && edge.from.length > 1;
+      let value: number;
+      let valueLabel: string;
+      let involved: AssertionId[];
+      if (isArrayFrom) {
+        const numericSources = sources.filter(isNum);
+        if (numericSources.length === 0) return null;
+        value = numericSources.reduce((acc, s) => acc + num(s), 0);
+        valueLabel = `Σ(${sources.map((s) => s.label).join(" + ")}) = ${value.toLocaleString()}`;
+        involved = [...sources.map((s) => s.id), target.id];
+      } else {
+        if (!isNum(target)) return null;
+        value = num(target);
+        valueLabel = `${target.label} (${value.toLocaleString()})`;
+        involved = [target.id, ...sources.map((s) => s.id)];
+      }
+      const span = Math.max(1, Math.abs((hi ?? value) - (lo ?? value)));
+      const slack = tol(edge) * span;
+      const underLow = lo != null && value < lo - slack;
+      const overHigh = hi != null && value > hi + slack;
+      if (!underLow && !overHigh) return null;
+      const boundLabel =
+        lo != null && hi != null ? `[${lo.toLocaleString()}, ${hi.toLocaleString()}]` :
+        lo != null ? `≥ ${lo.toLocaleString()}` :
+        `≤ ${hi!.toLocaleString()}`;
+      const distance = underLow
+        ? (lo as number) - value
+        : value - (hi as number);
+      return mkViolation(edge, involved, Math.abs(distance),
+        `${valueLabel} is outside ${boundLabel} (Δ ${Math.abs(distance).toLocaleString()}).`);
+    }
+
+    case "not-equals": {
+      // Sources != target. With one source, classic ≠. With multiple
+      // sources, the Σ(sources) must differ from target.
+      if (sources.length === 0) return null;
+      const isArrayFrom = Array.isArray(edge.from) && edge.from.length > 1;
+      if (isArrayFrom) {
+        if (!isNum(target)) return null;
+        const sum = sources.reduce((acc, s) => acc + (isNum(s) ? num(s) : 0), 0);
+        const t = num(target);
+        const slack = tol(edge) * Math.max(1, Math.abs(t));
+        const delta = Math.abs(t - sum);
+        if (delta <= slack) {
+          return mkViolation(edge, [...sources.map((s) => s.id), target.id], 1,
+            `${sources.map((s) => s.label).join(" + ")} (= ${sum.toLocaleString()}) must NOT equal ${target.label} (${t.toLocaleString()}).`);
+        }
+        return null;
+      }
+      const s = sources[0];
+      if (isNum(s) && isNum(target)) {
+        const slack = tol(edge) * Math.max(1, Math.abs(num(target)));
+        if (Math.abs(num(target) - num(s)) <= slack) {
+          return mkViolation(edge, [s.id, target.id], 1,
+            `${target.label} (${num(target)}) must NOT equal ${s.label} (${num(s)}).`);
+        }
+        return null;
+      }
+      if (s.value.type === "string" && target.value.type === "string") {
+        if (s.value.value.trim() === target.value.value.trim()) {
+          return mkViolation(edge, [s.id, target.id], 1,
+            `${target.label} ("${target.value.value}") must NOT equal ${s.label} ("${s.value.value}").`);
+        }
+      }
+      if (s.value.type === "date" && target.value.type === "date") {
+        if (s.value.value === target.value.value) {
+          return mkViolation(edge, [s.id, target.id], 1,
+            `${target.label} (${target.value.value}) must NOT equal ${s.label}.`);
+        }
+      }
+      if (s.value.type === "boolean" && target.value.type === "boolean") {
+        if (s.value.value === target.value.value) {
+          return mkViolation(edge, [s.id, target.id], 1,
+            `${target.label} must NOT equal ${s.label}.`);
+        }
+      }
+      return null;
+    }
+
+    case "divisible-by": {
+      // Either target or Σ(sources) must be a multiple of `divisor`.
+      const divisor = edge.divisor;
+      if (divisor == null || divisor === 0) return null;
+      const isArrayFrom = Array.isArray(edge.from) && edge.from.length > 1;
+      let value: number;
+      let valueLabel: string;
+      let involved: AssertionId[];
+      if (isArrayFrom) {
+        const numericSources = sources.filter(isNum);
+        if (numericSources.length === 0) return null;
+        value = numericSources.reduce((acc, s) => acc + num(s), 0);
+        valueLabel = `Σ(${sources.map((s) => s.label).join(" + ")}) = ${value.toLocaleString()}`;
+        involved = [...sources.map((s) => s.id), target.id];
+      } else {
+        if (!isNum(target)) return null;
+        value = num(target);
+        valueLabel = `${target.label} (${value.toLocaleString()})`;
+        involved = [target.id, ...sources.map((s) => s.id)];
+      }
+      const remainder = remainderOf(value, divisor);
+      const slack = tol(edge) * Math.abs(divisor);
+      if (remainder <= slack || Math.abs(remainder - Math.abs(divisor)) <= slack) return null;
+      return mkViolation(edge, involved, remainder,
+        `${valueLabel} is not divisible by ${divisor.toLocaleString()} (remainder ${remainder.toLocaleString()}).`);
+    }
+
     default:
       return null;
   }
+}
+
+/**
+ * Modulo for floating-point divisors. Returns a value in [0, |divisor|).
+ */
+function remainderOf(value: number, divisor: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(divisor) || divisor === 0) return 0;
+  const abs = Math.abs(divisor);
+  const r = value - Math.trunc(value / abs) * abs;
+  // Normalise toward [0, abs).
+  if (r < 0) return r + abs;
+  return r;
 }
 
 function truthy(a: Assertion): boolean {

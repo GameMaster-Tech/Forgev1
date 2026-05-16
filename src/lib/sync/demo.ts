@@ -40,6 +40,15 @@ export function buildDemoGraph(): DependencyGraph {
     // Roadmap — implied requirements
     { id: "a.roadmap.beta", projectId: PROJECT_ID, documentId: "doc.roadmap", key: "milestone.beta", label: "Beta launch", kind: "timeline.deadline", value: { type: "date", value: "2026-09-15" }, sourcedAt: NOW - 7 * 86400_000, source: "Roadmap v4", confidence: 0.8 },
     { id: "a.roadmap.ga", projectId: PROJECT_ID, documentId: "doc.roadmap", key: "milestone.ga", label: "GA launch", kind: "timeline.deadline", value: { type: "date", value: "2026-12-15" }, sourcedAt: NOW - 7 * 86400_000, source: "Roadmap v4", confidence: 0.7 },
+
+    // Marketing budget — used for `between` (must sit in a healthy band)
+    { id: "a.budget.marketing", projectId: PROJECT_ID, documentId: "doc.budget", key: "budget.marketing.annual", label: "Marketing budget", kind: "budget.lineitem", value: { type: "number", value: 240_000, unit: "USD" }, sourcedAt: NOW - 30 * 86400_000, source: "Budget v3", confidence: 0.6 },
+
+    // Hiring plan — board-mandated TOTAL headcount (used by `not-equals`)
+    { id: "a.hiring.totalCap", projectId: PROJECT_ID, documentId: "doc.hiring", key: "engineering.total.cap", label: "Board headcount cap", kind: "headcount", value: { type: "number", value: 5, unit: "people" }, sourcedAt: NOW - 14 * 86400_000, source: "Board mandate", confidence: 0.95, locked: true },
+
+    // Hiring plan — squad size constraint (used by `divisible-by`)
+    { id: "a.hiring.squadSize", projectId: PROJECT_ID, documentId: "doc.hiring", key: "engineering.squad.size", label: "Squad size (engineers per pod)", kind: "headcount", value: { type: "number", value: 4, unit: "people" }, sourcedAt: NOW - 60 * 86400_000, source: "Org design memo", confidence: 0.85, locked: true },
   ];
   for (const a of A) g.upsertAssertion(a);
 
@@ -89,6 +98,43 @@ export function buildDemoGraph(): DependencyGraph {
       operand: 205_000,
       severity: "soft",
       rationale: "Senior engineer comp must sit inside the May-2026 market band",
+    },
+    // ── New constraint kinds ──
+    // `between` — marketing spend must sit in a healthy band [260k, 320k].
+    {
+      id: "c.budget.marketing.band",
+      projectId: PROJECT_ID,
+      from: "a.budget.marketing",
+      to: "a.budget.marketing",
+      kind: "between",
+      lowerBound: 260_000,
+      upperBound: 320_000,
+      severity: "soft",
+      rationale: "Marketing budget must stay inside the 260k–320k working band",
+    },
+    // `not-equals` — total hiring (senior+junior) must NOT exactly equal the
+    // board-mandated cap (we want to deliberately hire under-cap so we
+    // retain a buffer for a designer headcount swap).
+    {
+      id: "c.hiring.below-cap",
+      projectId: PROJECT_ID,
+      from: ["a.hiring.seniorCount", "a.hiring.juniorCount"],
+      to: "a.hiring.totalCap",
+      kind: "not-equals",
+      severity: "hard",
+      rationale: "Total engineering headcount must hold back below the board cap",
+    },
+    // `divisible-by` — engineers must be hired in even-numbered cohorts
+    // (squads of 2). 5 is odd → violation.
+    {
+      id: "c.hiring.squad-parity",
+      projectId: PROJECT_ID,
+      from: ["a.hiring.seniorCount", "a.hiring.juniorCount"],
+      to: "a.hiring.squadSize",
+      kind: "divisible-by",
+      divisor: 2,
+      severity: "soft",
+      rationale: "Engineers are hired in pairs — squad parity rule (mod 2)",
     },
   ];
   for (const c of C) g.upsertConstraint(c);
