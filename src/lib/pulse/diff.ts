@@ -8,31 +8,49 @@
 
 import type { Assertion } from "../sync/types";
 import { trustAt } from "./decay";
+import { blendContributions } from "./reality";
 import type {
+  OracleContribution,
+  OracleRegistry,
   PulseConfig,
   RealityDiff,
   RealityOracle,
   RealityReading,
 } from "./types";
 
+/**
+ * Accepts either:
+ *   • a plain `RealityOracle` (legacy single-oracle path), or
+ *   • an `OracleRegistry` (multi-oracle composition path).
+ *
+ * The registry path additionally surfaces each contributing oracle
+ * inside `RealityDiff.contributions` so the UI can show provenance.
+ */
 export async function realityDiff(
   assertions: Assertion[],
-  oracle: RealityOracle,
+  oracle: RealityOracle | OracleRegistry,
   cfg: Pick<PulseConfig, "invalidateThreshold" | "staleThreshold">,
   now = Date.now(),
 ): Promise<RealityDiff[]> {
+  const isRegistry = typeof (oracle as OracleRegistry).query === "function";
+  const reg = isRegistry ? (oracle as OracleRegistry) : null;
+  const fn = !isRegistry ? (oracle as RealityOracle) : null;
+
   const out: RealityDiff[] = [];
-  // Sequential. The oracle is cheap in mock form; switching to
-  // Promise.all is a one-line change if we move to a real network
-  // adapter that supports concurrency.
   for (const a of assertions) {
     if (a.locked) {
       out.push(passthrough(a, null, now, "Locked by user — skipped reality check.", "fresh"));
       continue;
     }
     let reading: RealityReading | null = null;
+    let contributions: OracleContribution[] | undefined;
     try {
-      reading = await oracle(a);
+      if (reg) {
+        contributions = await reg.query(a);
+        reading = blendContributions(contributions);
+      } else if (fn) {
+        reading = await fn(a);
+      }
     } catch {
       reading = null;
     }
@@ -40,7 +58,7 @@ export async function realityDiff(
       out.push(passthrough(a, null, now, "No oracle reading available for this kind.", "fresh"));
       continue;
     }
-    out.push(compare(a, reading, cfg, now));
+    out.push(compare(a, reading, cfg, now, contributions));
   }
   return out;
 }
@@ -50,6 +68,7 @@ function compare(
   r: RealityReading,
   cfg: Pick<PulseConfig, "invalidateThreshold" | "staleThreshold">,
   now: number,
+  contributions?: OracleContribution[],
 ): RealityDiff {
   const trustBefore = trustAt(a, now);
   let delta = 0;
@@ -97,6 +116,7 @@ function compare(
     realitySource: r.source,
     realityAsOf: r.asOf,
     message,
+    contributions: contributions && contributions.length > 0 ? contributions : undefined,
   };
 }
 

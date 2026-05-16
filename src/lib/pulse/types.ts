@@ -50,6 +50,55 @@ export interface RealityReading {
  */
 export type RealityOracle = (assertion: Assertion) => Promise<RealityReading | null>;
 
+/* ───────────── multi-oracle composition ───────────── */
+
+/**
+ * One leg of a multi-oracle composition. The same shape as the
+ * `RealityReading` produced by a single oracle, plus identity fields so
+ * the UI can show each leg's contribution.
+ */
+export interface OracleContribution {
+  /** Unique oracle id (`market`, `policy`, etc.). */
+  oracleId: string;
+  /** Human-readable name surfaced in the UI. */
+  oracleName: string;
+  /** This oracle's priority weight (≥0). Higher = more influence. */
+  priority: number;
+  /** The reading the oracle returned. */
+  reading: RealityReading;
+}
+
+/**
+ * A registered oracle. A `match` function decides whether the oracle
+ * applies to an assertion; `priority` is the weight used when blending
+ * multiple matching oracles for the same assertion.
+ */
+export interface RegisteredOracle {
+  id: string;
+  name: string;
+  /** Higher priorities dominate blends. Must be > 0. Default 1. */
+  priority: number;
+  /** Pure predicate over (kind, tag). Cheap; called once per assertion. */
+  match: (input: { kind: Assertion["kind"]; tag?: string; assertion: Assertion }) => boolean;
+  /** Async fetch. Should return null when the oracle can't speak. */
+  fetch: (assertion: Assertion) => Promise<RealityReading | null>;
+}
+
+export interface OracleRegistry {
+  register: (oracle: RegisteredOracle) => void;
+  unregister: (id: string) => void;
+  list: () => RegisteredOracle[];
+  /** Resolve every oracle that claims `assertion`. */
+  matching: (assertion: Assertion) => RegisteredOracle[];
+  /** Fetch from every matching oracle and return per-oracle contributions. */
+  query: (assertion: Assertion) => Promise<OracleContribution[]>;
+  /**
+   * Convenience: produce a single `RealityOracle` callable that blends
+   * matching contributions via priority-weighted average.
+   */
+  asOracle: () => RealityOracle;
+}
+
 /* ───────────── Reality-Diff ───────────── */
 
 export type DiffStatus = "fresh" | "stale" | "invalidated";
@@ -71,6 +120,11 @@ export interface RealityDiff {
   realityAsOf?: string;
   /** Plain-English explanation. */
   message: string;
+  /**
+   * Optional breakdown when multiple oracles contributed to the diff.
+   * Empty / undefined for legacy single-oracle runs.
+   */
+  contributions?: OracleContribution[];
 }
 
 /* ───────────── Refactor ───────────── */

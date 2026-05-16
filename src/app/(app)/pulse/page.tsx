@@ -30,10 +30,11 @@ import type { Assertion, AssertionId } from "@/lib/sync";
 import {
   buildDemoBlocks,
   defaultConfig,
-  mockMarketOracle,
+  defaultRegistry,
   runSync,
   snapshot as trustSnapshot,
   type Cadence,
+  type OracleContribution,
   type PulseConfig,
   type RealityDiff,
   type RefactorProposal,
@@ -78,8 +79,8 @@ export default function PulsePage() {
   const handleRun = async () => {
     setRunning(true);
     const config: Partial<PulseConfig> = { ...defaultConfig(graph.projectId), cadence };
-    const oracle = mockMarketOracle(2026);
-    const next = await runSync({ assertions, blocks, oracle, config });
+    const registry = defaultRegistry(2026);
+    const next = await runSync({ assertions, blocks, oracle: registry, config });
     setRun(next);
     setRunning(false);
   };
@@ -87,11 +88,11 @@ export default function PulsePage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const oracle = mockMarketOracle(2026);
+      const registry = defaultRegistry(2026);
       const next = await runSync({
         assertions: graph.listAssertions(),
         blocks: buildDemoBlocks(),
-        oracle,
+        oracle: registry,
         config: { ...defaultConfig(graph.projectId), cadence: "weekly" },
       });
       if (!cancelled) setRun(next);
@@ -356,9 +357,34 @@ function DiffRow({ diff, index, assertion }: { diff: RealityDiff; index: number;
             <span className={`border border-border px-2 py-1 text-[11px] ${diff.status === "invalidated" ? "bg-foreground text-background" : "bg-background text-foreground"}`}>reality · {describe(diff.realityValue)}</span>
             {diff.realityAsOf && <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">as of {diff.realityAsOf}</span>}
           </div>
+          {diff.contributions && diff.contributions.length > 1 && (
+            <ContributionBreakdown contributions={diff.contributions} />
+          )}
         </div>
       </div>
     </motion.li>
+  );
+}
+
+function ContributionBreakdown({ contributions }: { contributions: OracleContribution[] }) {
+  const total = contributions.reduce((acc, c) => acc + Math.max(0, c.priority), 0);
+  return (
+    <div className="mt-2 border-l-2 border-cyan/40 pl-3 space-y-1">
+      <p className="text-[10px] uppercase tracking-[0.15em] text-cyan font-semibold">
+        {contributions.length} oracles · blended
+      </p>
+      {contributions.map((c) => {
+        const share = total > 0 ? (c.priority / total) * 100 : 100 / contributions.length;
+        return (
+          <div key={c.oracleId} className="text-[11px] text-muted flex items-baseline gap-2 flex-wrap">
+            <span className="font-semibold text-foreground">{c.oracleName}</span>
+            <span className="text-cyan tabular-nums">×{c.priority}</span>
+            <span className="tabular-nums">{share.toFixed(0)}% weight</span>
+            <span className="text-muted">· {describe(c.reading.value)}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

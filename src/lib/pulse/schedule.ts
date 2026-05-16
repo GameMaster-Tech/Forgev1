@@ -9,6 +9,7 @@ import { realityDiff } from "./diff";
 import { refactorBlocks } from "./refactor";
 import type {
   ContentBlock,
+  OracleRegistry,
   PulseConfig,
   RealityOracle,
   SyncRun,
@@ -28,7 +29,12 @@ export function defaultConfig(projectId: string): PulseConfig {
 export interface RunSyncInput {
   assertions: Assertion[];
   blocks?: ContentBlock[];
-  oracle: RealityOracle;
+  /**
+   * Either a single oracle (legacy) or a registry (multi-oracle
+   * composition). The registry path additionally annotates each diff
+   * with `contributions`.
+   */
+  oracle: RealityOracle | OracleRegistry;
   config?: Partial<PulseConfig>;
   now?: number;
 }

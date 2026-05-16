@@ -8,11 +8,14 @@ export type {
   Cadence,
   ContentBlock,
   DecayProfile,
+  OracleContribution,
+  OracleRegistry,
   PulseConfig,
   RealityDiff,
   RealityOracle,
   RealityReading,
   RefactorProposal,
+  RegisteredOracle,
   SyncRun,
   TrustSnapshot,
 } from "./types";
@@ -20,6 +23,13 @@ export type {
 export { trustAt, ageDays, profileFor, snapshot, projectInvalidateAt } from "./decay";
 export { realityDiff } from "./diff";
 export { refactorBlocks } from "./refactor";
-export { mockMarketOracle } from "./reality";
+export {
+  blendContributions,
+  buildMarketOracle,
+  buildPolicyOracle,
+  createOracleRegistry,
+  defaultRegistry,
+  mockMarketOracle,
+} from "./reality";
 export { runSync, scheduleSync, defaultConfig } from "./schedule";
 export { buildDemoBlocks } from "./demo";
