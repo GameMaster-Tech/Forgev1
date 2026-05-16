@@ -46,3 +46,14 @@ export type { DecomposeResult } from "./decompose";
 export { createWatcher } from "./watcher";
 export type { CreateWatcherArgs } from "./watcher";
 export { buildDemoContext, DEMO_PARENT_TASKS } from "./demo";
+
+export {
+  deleteTaskDoc,
+  deserializeTask,
+  reconcile,
+  serializeTask,
+  subscribeTree,
+  writeTask,
+  writeTree,
+} from "./persistence";
+export type { SubscribeOptions, WriteOptions } from "./persistence";

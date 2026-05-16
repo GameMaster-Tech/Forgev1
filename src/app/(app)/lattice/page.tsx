@@ -35,13 +35,17 @@ import {
   History,
   FlaskConical,
   Layers,
+  Radio,
 } from "lucide-react";
 import {
   buildDemoContext,
   DEMO_PARENT_TASKS,
   createWatcher,
   parseIntent,
+  reconcile,
   resolveTree,
+  subscribeTree,
+  writeTree,
   type AtomicSubtask,
   type DraftAssertionWrite,
   type ParsedIntent,
@@ -52,6 +56,7 @@ import {
   type TaskStatus,
   type TaskTree,
 } from "@/lib/lattice";
+import { useAuth } from "@/context/AuthContext";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -72,7 +77,12 @@ const TABS: { key: Tab; label: string; icon: typeof Network }[] = [
   { key: "watcher",  label: "Watcher",  icon: History },
 ];
 
+// Demo project id used when the user is unauthenticated; live mirror
+// only kicks in for the real authed project.
+const DEMO_PROJECT_ID = "demo-project";
+
 export default function LatticePage() {
+  const { user } = useAuth();
   const [ctx, setCtx] = useState<ProjectContext | null>(null);
   const [parentTask, setParentTask] = useState<string>(DEMO_PARENT_TASKS[0]);
   const [draftPrompt, setDraftPrompt] = useState<string>(DEMO_PARENT_TASKS[0]);
@@ -81,18 +91,27 @@ export default function LatticePage() {
   const [history, setHistory] = useState<RebranchResult[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [liveSubscribed, setLiveSubscribed] = useState(false);
   const watcherRef = useRef<ReturnType<typeof createWatcher> | null>(null);
+  // Stable refs so the subscribe/write effect can see the latest tree
+  // without re-subscribing on every change.
+  const treeRef = useRef<TaskTree | null>(null);
+  useEffect(() => { treeRef.current = tree; }, [tree]);
+  // Watermark for echo suppression — never mirror back a tree we
+  // already wrote with the same `updatedAt`.
+  const lastWrittenAtRef = useRef<number>(0);
+  // Watermark of the most recent remote snapshot — used to skip mirror
+  // writes that arrive purely from a remote echo.
+  const lastRemoteAtRef = useRef<number>(0);
 
   useEffect(() => {
     const initial = buildDemoContext();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCtx(initial);
   }, []);
 
   useEffect(() => {
     if (!ctx) return;
     let mounted = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRunning(true);
     const w = createWatcher({
       parentTask,
@@ -118,6 +137,61 @@ export default function LatticePage() {
       w.dispose();
     };
   }, [ctx, parentTask]);
+
+  // ── Live Firestore subscription (TASK 6) ──
+  // Subscribes once we have an authed user + a tree to anchor against.
+  // Reconciles remote subtasks back into the in-memory tree via
+  // last-write-wins per row.
+  useEffect(() => {
+    if (!user || !tree) return;
+    let active = true;
+    const opts = { uid: user.uid, projectId: DEMO_PROJECT_ID, rootId: tree.rootId };
+    const unsub = subscribeTree({
+      ...opts,
+      onTree: (remote) => {
+        if (!active) return;
+        const local = treeRef.current;
+        lastRemoteAtRef.current = remote.updatedAt;
+        if (!local) {
+          setTree(remote);
+          return;
+        }
+        const merged = reconcile(local, remote);
+        // Only setTree if the reconciled tree differs in some way.
+        if (merged !== local) setTree(merged);
+      },
+      onError: (err) => {
+        console.warn("[lattice] live subscribe failed:", err);
+      },
+    });
+    setLiveSubscribed(true);
+    return () => {
+      active = false;
+      unsub();
+      setLiveSubscribed(false);
+    };
+    // We deliberately subscribe per-rootId, not per-tree, so a local
+    // tree mutation doesn't tear down and recreate the listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, tree?.rootId]);
+
+  // ── Best-effort mirror writes (TASK 6) ──
+  // Whenever the tree updates locally, push it to Firestore. Throttled
+  // implicitly by React batching; the writeTree helper chunks into
+  // ≤450-op batches if the tree ever grows past that.
+  //
+  // Echo suppression: if `tree.updatedAt` equals the most recent remote
+  // snapshot we just received (or matches what we last wrote), skip
+  // the round-trip to avoid an infinite subscribe→write→subscribe loop.
+  useEffect(() => {
+    if (!user || !tree) return;
+    if (tree.updatedAt <= lastRemoteAtRef.current) return;
+    if (tree.updatedAt === lastWrittenAtRef.current) return;
+    lastWrittenAtRef.current = tree.updatedAt;
+    writeTree(tree, { uid: user.uid, projectId: DEMO_PROJECT_ID }).catch((err) => {
+      console.warn("[lattice] mirror write failed:", err);
+    });
+  }, [user, tree]);
 
   const intent = useMemo<ParsedIntent>(() => parseIntent(parentTask), [parentTask]);
 
@@ -238,6 +312,15 @@ export default function LatticePage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {liveSubscribed && (
+              <span
+                className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-green border border-green/30 bg-green/[0.06] px-3 py-1.5"
+                title="Subscribed to remote tree changes"
+              >
+                <Radio size={10} strokeWidth={2.25} className="animate-pulse" />
+                Live
+              </span>
+            )}
             <button
               onClick={manualFlush}
               disabled={running}
