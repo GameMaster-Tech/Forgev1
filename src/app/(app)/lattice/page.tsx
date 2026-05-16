@@ -3,10 +3,11 @@
 /**
  * Lattice — recursive task decomposition.
  *
- * Layout mirrors Sync/Pulse: 8/4 main + rail. Main column shows the
- * task tree (root prompt → atomic subtasks with status, conditions,
- * drafts). Rail surfaces parser intent, rebranch history, and a
- * principle card.
+ * Editorial sub-nav layout (matches Sync/Pulse density):
+ *   • Overview  — parser intent + rebranch log + principle card
+ *   • Subtasks  — the task tree (indented, recursively decomposable)
+ *   • Drafts    — pre-computed draft outcomes (table view per row)
+ *   • Watcher   — context mutator panel + rebranch history
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -27,10 +28,13 @@ import {
   FileText,
   Cpu,
   Eye,
-  GitBranch,
   Hourglass,
   CheckSquare,
   X,
+  GitBranch,
+  History,
+  FlaskConical,
+  Layers,
 } from "lucide-react";
 import {
   buildDemoContext,
@@ -39,10 +43,12 @@ import {
   parseIntent,
   resolveTree,
   type AtomicSubtask,
+  type DraftAssertionWrite,
   type ParsedIntent,
   type ProjectContext,
   type RebranchResult,
   type ResolutionCondition,
+  type TaskId,
   type TaskStatus,
   type TaskTree,
 } from "@/lib/lattice";
@@ -58,9 +64,15 @@ const STATUS_META: Record<TaskStatus, { label: string; tone: string; bg: string;
   "user-locked": { label: "Locked",    tone: "text-cyan",   bg: "bg-cyan",   icon: Lock },
 };
 
+type Tab = "overview" | "subtasks" | "drafts" | "watcher";
+const TABS: { key: Tab; label: string; icon: typeof Network }[] = [
+  { key: "overview", label: "Overview", icon: Sparkles },
+  { key: "subtasks", label: "Subtasks", icon: Layers },
+  { key: "drafts",   label: "Drafts",   icon: FlaskConical },
+  { key: "watcher",  label: "Watcher",  icon: History },
+];
+
 export default function LatticePage() {
-  // Mutable demo context. We mutate this in-page to demo the watcher's
-  // dynamic re-branching.
   const [ctx, setCtx] = useState<ProjectContext | null>(null);
   const [parentTask, setParentTask] = useState<string>(DEMO_PARENT_TASKS[0]);
   const [draftPrompt, setDraftPrompt] = useState<string>(DEMO_PARENT_TASKS[0]);
@@ -68,19 +80,19 @@ export default function LatticePage() {
   const [running, setRunning] = useState(false);
   const [history, setHistory] = useState<RebranchResult[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
   const watcherRef = useRef<ReturnType<typeof createWatcher> | null>(null);
 
-  // SSR-safe bootstrap.
   useEffect(() => {
     const initial = buildDemoContext();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCtx(initial);
   }, []);
 
-  // (Re)create the watcher whenever the parent prompt changes.
   useEffect(() => {
     if (!ctx) return;
     let mounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRunning(true);
     const w = createWatcher({
       parentTask,
@@ -92,12 +104,12 @@ export default function LatticePage() {
     const unsub = w.subscribe((r) => {
       if (!mounted) return;
       setTree(w.getTree());
-      setHistory((prev) => [r, ...prev].slice(0, 8));
+      setHistory((prev) => [r, ...prev].slice(0, 16));
     });
     w.flush().then((r) => {
       if (!mounted) return;
       setTree(w.getTree());
-      if (r) setHistory((prev) => [r, ...prev].slice(0, 8));
+      if (r) setHistory((prev) => [r, ...prev].slice(0, 16));
       setRunning(false);
     });
     return () => {
@@ -108,24 +120,29 @@ export default function LatticePage() {
   }, [ctx, parentTask]);
 
   const intent = useMemo<ParsedIntent>(() => parseIntent(parentTask), [parentTask]);
-  const subtasks = useMemo(() => {
+
+  // Top-level children of the root, in declared order.
+  const topLevelSubtasks = useMemo(() => {
     if (!tree) return [];
     const kids = tree.childrenOf.get(tree.rootId) ?? [];
     return kids.map((id) => tree.tasks.get(id)).filter((x): x is AtomicSubtask => !!x);
   }, [tree]);
 
+  // Flat list of every task for the drafts table.
+  const allTasksWithDrafts = useMemo(() => {
+    if (!tree) return [];
+    return Array.from(tree.tasks.values()).filter((t) => !!t.draftOutcome && t.status !== "irrelevant");
+  }, [tree]);
+
   const selected = selectedTaskId && tree ? tree.tasks.get(selectedTaskId) : null;
 
-  // Counts for the stat strip.
   const counts = useMemo(() => {
     const c: Record<TaskStatus, number> = {
       pending: 0, in_progress: 0, blocked: 0, complete: 0, irrelevant: 0, "user-locked": 0,
     };
-    for (const t of subtasks) c[t.status]++;
+    for (const t of topLevelSubtasks) c[t.status]++;
     return c;
-  }, [subtasks]);
-
-  /* ── Mutators that prove the watcher works ── */
+  }, [topLevelSubtasks]);
 
   function mutateAssertion(key: string, deltaPct: number) {
     if (!ctx || !watcherRef.current) return;
@@ -160,7 +177,7 @@ export default function LatticePage() {
     setRunning(false);
   }
 
-  function toggleUserLock(id: string) {
+  function toggleUserLock(id: TaskId) {
     if (!tree) return;
     const t = tree.tasks.get(id);
     if (!t) return;
@@ -176,7 +193,7 @@ export default function LatticePage() {
     setTree(newTree);
   }
 
-  function commitTaskComplete(id: string) {
+  function commitTaskComplete(id: TaskId) {
     if (!tree) return;
     const t = tree.tasks.get(id);
     if (!t) return;
@@ -194,30 +211,30 @@ export default function LatticePage() {
 
   return (
     <div className="min-h-full bg-background">
-      {/* Header */}
+      {/* ───────── Header ───────── */}
       <motion.header
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="border-b border-border px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-5"
+        className="px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
       >
         <div className="flex items-end justify-between gap-6 flex-wrap">
-          <div className="min-w-0">
+          <div className="max-w-2xl">
             <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
               <Network size={11} strokeWidth={1.75} />
               Lattice · state-to-action translator
             </p>
             <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
-              {counts.complete === subtasks.length && subtasks.length > 0 ? (
+              {counts.complete === topLevelSubtasks.length && topLevelSubtasks.length > 0 ? (
                 <>Goal is <span className="text-green">compiled</span>.</>
               ) : counts.blocked > 0 ? (
                 <><span className="text-rose">{counts.blocked} blocked</span>, {counts.pending + counts.in_progress} open.</>
               ) : (
-                <><span className="text-violet">{subtasks.length}</span> atomic subtask{subtasks.length === 1 ? "" : "s"} generated.</>
+                <><span className="text-violet">{topLevelSubtasks.length}</span> atomic subtask{topLevelSubtasks.length === 1 ? "" : "s"} generated.</>
               )}
             </h1>
-            <p className="text-[13px] text-muted mt-2 max-w-2xl leading-relaxed">
-              Type a goal. Lattice parses intent, cross-references the project state, and emits atomic subtasks bound to specific assertions and document sections. Mutate the data on the right — watch the tree re-decompose.
+            <p className="text-[13px] text-muted mt-3 leading-relaxed">
+              Type a goal. Lattice parses intent, cross-references project state, and emits atomic subtasks bound to specific assertions and document sections. Mutate the data in the Watcher tab — watch the tree re-decompose.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -255,7 +272,6 @@ export default function LatticePage() {
           </button>
         </div>
 
-        {/* Preset prompts */}
         <div className="flex flex-wrap gap-2">
           {DEMO_PARENT_TASKS.map((t) => (
             <button
@@ -273,7 +289,6 @@ export default function LatticePage() {
           ))}
         </div>
 
-        {/* Stat strip */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2">
           <Stat label="Open" value={counts.pending + counts.in_progress} tone="violet" />
           <Stat label="Complete" value={counts.complete} tone="green" />
@@ -283,46 +298,426 @@ export default function LatticePage() {
         </div>
       </motion.header>
 
-      {/* Body */}
-      <div className="grid grid-cols-12 gap-x-0">
-        <div className="col-span-12 lg:col-span-8 px-6 sm:px-10 pb-16 lg:border-r lg:border-border">
-          <section className="mt-8">
-            <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3 flex items-center gap-2">
-              <GitBranch size={11} />
-              Task tree · depth-1 fanout
-            </p>
-            {!tree ? (
-              <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">Decomposing…</div>
-            ) : subtasks.length === 0 ? (
-              <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">No subtasks emitted.</div>
-            ) : (
-              <ul className="divide-y divide-border border-y border-border">
-                {subtasks.map((task, i) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    index={i + 1}
-                    onSelect={() => setSelectedTaskId(task.id)}
-                    onToggleLock={() => toggleUserLock(task.id)}
-                    onCommit={() => commitTaskComplete(task.id)}
+      {/* ───────── Sub-nav ───────── */}
+      <div className="border-y border-border bg-background sticky top-0 z-10">
+        <div className="px-6 sm:px-10 flex items-center">
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            const Icon = t.icon;
+            const badge =
+              t.key === "subtasks" ? topLevelSubtasks.length :
+              t.key === "drafts" ? allTasksWithDrafts.length :
+              t.key === "watcher" ? history.length : null;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`relative text-[11px] uppercase tracking-[0.14em] font-semibold px-4 py-3 transition-colors duration-150 ${active ? "text-foreground" : "text-muted hover:text-foreground"}`}
+                aria-current={active ? "page" : undefined}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Icon size={11} strokeWidth={1.75} />
+                  {t.label}
+                  {badge !== null && (
+                    <span className={`text-[10px] tabular-nums px-1.5 py-0.5 ${active ? "bg-violet text-white" : "bg-surface-light text-muted"}`}>
+                      {badge}
+                    </span>
+                  )}
+                </span>
+                {active && (
+                  <motion.span
+                    layoutId="lattice-tab-indicator"
+                    transition={{ duration: 0.22, ease }}
+                    className="absolute left-0 right-0 -bottom-px h-[2px] bg-violet"
                   />
-                ))}
-              </ul>
-            )}
-          </section>
+                )}
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        <aside className="col-span-12 lg:col-span-4 px-6 sm:px-10 pt-8 pb-16 space-y-6">
-          <IntentCard intent={intent} />
-          <ContextMutator ctx={ctx} onShiftSalary={() => mutateAssertion("engineering.senior.salary", 0.4)} onDeleteRunway={() => deleteAssertion("runway.months")} onResetCtx={() => setCtx(buildDemoContext())} />
-          <RebranchHistory history={history} />
-          <PrincipleCard />
-        </aside>
+      {/* ───────── Tab content ───────── */}
+      <div className="px-6 sm:px-10 pt-8 pb-16">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.22, ease }}
+          >
+            {tab === "overview" && (
+              <OverviewPanel intent={intent} history={history} parentTask={parentTask} />
+            )}
+            {tab === "subtasks" && (
+              <SubtasksPanel
+                tree={tree}
+                topLevelSubtasks={topLevelSubtasks}
+                onSelect={(id) => setSelectedTaskId(id)}
+                onToggleLock={toggleUserLock}
+                onCommit={commitTaskComplete}
+                ctx={ctx}
+                onTreeChange={(t) => setTree(t)}
+              />
+            )}
+            {tab === "drafts" && (
+              <DraftsPanel
+                tree={tree}
+                tasks={allTasksWithDrafts}
+                onSelect={(id) => setSelectedTaskId(id)}
+                onCommit={commitTaskComplete}
+              />
+            )}
+            {tab === "watcher" && (
+              <WatcherPanel
+                ctx={ctx}
+                history={history}
+                onShiftSalary={() => mutateAssertion("engineering.senior.salary", 0.4)}
+                onDeleteRunway={() => deleteAssertion("runway.months")}
+                onResetCtx={() => setCtx(buildDemoContext())}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <AnimatePresence>
         {selected && <TaskDrawer task={selected} onClose={() => setSelectedTaskId(null)} />}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/* ─────── Overview tab ─────── */
+
+function OverviewPanel({ intent, history, parentTask }: { intent: ParsedIntent; history: RebranchResult[]; parentTask: string }) {
+  return (
+    <div className="max-w-5xl mx-auto space-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <IntentCard intent={intent} parentTask={parentTask} />
+        <RebranchSummary history={history} />
+      </div>
+      <PrincipleCard />
+    </div>
+  );
+}
+
+function IntentCard({ intent, parentTask }: { intent: ParsedIntent; parentTask: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.08, ease }}
+      className="border border-border bg-foreground text-background p-5 relative overflow-hidden"
+    >
+      <span aria-hidden className="absolute top-0 left-0 w-[2px] h-full bg-violet" />
+      <div className="flex items-center gap-2 mb-3">
+        <Sparkles size={12} strokeWidth={2.25} className="text-violet" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium">Parsed intent</span>
+      </div>
+      <p className="text-[13px] text-background/80 leading-relaxed mb-3">{parentTask}</p>
+      <div className="space-y-1.5 text-[12.5px]">
+        <Row k="Kind" v={intent.kind} />
+        <Row k="Verb" v={intent.verb || "—"} />
+        <Row k="Object" v={intent.object || "—"} />
+        <Row k="Quantity" v={intent.quantity != null ? String(intent.quantity) : "—"} />
+        <Row k="By date" v={intent.byDate ?? "—"} />
+        <Row k="Confidence" v={`${Math.round(intent.confidence * 100)}%`} />
+      </div>
+      {intent.unresolved.length > 0 && (
+        <ul className="mt-3 space-y-0.5">
+          {intent.unresolved.map((u, i) => (
+            <li key={i} className="text-[11px] text-warm">⚠ {u}</li>
+          ))}
+        </ul>
+      )}
+    </motion.div>
+  );
+}
+
+function RebranchSummary({ history }: { history: RebranchResult[] }) {
+  const last = history[0];
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.12, ease }}
+      className="border border-border bg-surface p-5 relative overflow-hidden"
+    >
+      <span aria-hidden className="absolute top-0 left-0 w-[2px] h-full bg-cyan" />
+      <div className="flex items-center gap-2 mb-3">
+        <History size={12} strokeWidth={2} className="text-cyan" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">Latest rebranch</span>
+      </div>
+      {!last ? (
+        <p className="text-[13px] text-muted">No rebranches yet — push a mutator from the Watcher tab.</p>
+      ) : (
+        <>
+          <p className="text-[13px] text-foreground leading-relaxed mb-3 tabular-nums">
+            Ran {new Date(last.ranAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+          </p>
+          <div className="text-[12px] flex flex-wrap gap-x-3 gap-y-1">
+            {last.added.length > 0 && <span className="text-green">+{last.added.length} added</span>}
+            {last.removed.length > 0 && <span className="text-rose">-{last.removed.length} removed</span>}
+            {last.statusChanged.length > 0 && <span className="text-violet">{last.statusChanged.length} status</span>}
+            {last.draftsRefreshed.length > 0 && <span className="text-cyan">{last.draftsRefreshed.length} drafts</span>}
+            {last.blocked.length > 0 && <span className="text-warm">{last.blocked.length} blocked</span>}
+            {last.added.length === 0 && last.removed.length === 0 && last.statusChanged.length === 0 && last.draftsRefreshed.length === 0 && (
+              <span className="text-muted">no-op</span>
+            )}
+          </div>
+        </>
+      )}
+    </motion.div>
+  );
+}
+
+function PrincipleCard() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.18, ease }}
+      className="border border-border bg-foreground text-background p-5 relative overflow-hidden"
+    >
+      <span aria-hidden className="absolute top-0 left-0 w-[2px] h-full bg-cyan" />
+      <div className="flex items-center gap-2 mb-3">
+        <Network size={12} strokeWidth={2} className="text-cyan" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium">The principle</span>
+      </div>
+      <h3 className="font-display font-bold text-[18px] tracking-[-0.018em] leading-[1.2] mb-3">
+        Tasks aren&apos;t a list. They&apos;re a <span className="text-cyan">function of state</span>.
+      </h3>
+      <p className="text-[13px] text-background/70 leading-relaxed">
+        Change the data and the task tree changes with it. Done-ness is a query against the project, not a checkbox.
+      </p>
+    </motion.div>
+  );
+}
+
+/* ─────── Subtasks tab ─────── */
+
+function SubtasksPanel({
+  tree,
+  topLevelSubtasks,
+  onSelect,
+  onToggleLock,
+  onCommit,
+  ctx,
+  onTreeChange,
+}: {
+  tree: TaskTree | null;
+  topLevelSubtasks: AtomicSubtask[];
+  onSelect: (id: TaskId) => void;
+  onToggleLock: (id: TaskId) => void;
+  onCommit: (id: TaskId) => void;
+  ctx: ProjectContext | null;
+  onTreeChange: (next: TaskTree) => void;
+}) {
+  return (
+    <div className="max-w-5xl mx-auto">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3 flex items-center gap-2">
+        <GitBranch size={11} />
+        Task tree · {topLevelSubtasks.length} top-level subtask{topLevelSubtasks.length === 1 ? "" : "s"}
+      </p>
+      {!tree ? (
+        <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">Decomposing…</div>
+      ) : topLevelSubtasks.length === 0 ? (
+        <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">No subtasks emitted.</div>
+      ) : (
+        <ul className="divide-y divide-border border-y border-border">
+          {topLevelSubtasks.map((task, i) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              index={i + 1}
+              depth={0}
+              tree={tree}
+              ctx={ctx}
+              onSelect={onSelect}
+              onToggleLock={onToggleLock}
+              onCommit={onCommit}
+              onTreeChange={onTreeChange}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ─────── Drafts tab ─────── */
+
+function DraftsPanel({
+  tree,
+  tasks,
+  onSelect,
+  onCommit,
+}: {
+  tree: TaskTree | null;
+  tasks: AtomicSubtask[];
+  onSelect: (id: TaskId) => void;
+  onCommit: (id: TaskId) => void;
+}) {
+  if (!tree) return <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">No drafts yet.</div>;
+  if (tasks.length === 0) {
+    return (
+      <div className="max-w-5xl mx-auto border border-border bg-surface py-16 text-center">
+        <FlaskConical size={20} className="mx-auto text-muted mb-2" strokeWidth={1.5} />
+        <p className="text-[13px] text-muted">No draft outcomes — Lattice couldn&apos;t synthesise commitable writes from the current context.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-5xl mx-auto">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3 flex items-center gap-2">
+        <FlaskConical size={11} />
+        Pre-computed drafts · {tasks.length} commitable outcome{tasks.length === 1 ? "" : "s"}
+      </p>
+      <div className="border border-border overflow-x-auto">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-surface text-muted">
+            <tr className="text-left">
+              <th className="px-4 py-2.5 font-medium text-[10px] uppercase tracking-[0.12em]">Subtask</th>
+              <th className="px-4 py-2.5 font-medium text-[10px] uppercase tracking-[0.12em]">Writes</th>
+              <th className="px-4 py-2.5 font-medium text-[10px] uppercase tracking-[0.12em]">Confidence</th>
+              <th className="px-4 py-2.5 font-medium text-[10px] uppercase tracking-[0.12em]">Caveats</th>
+              <th className="px-4 py-2.5 font-medium text-[10px] uppercase tracking-[0.12em]" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border bg-background">
+            {tasks.map((t) => {
+              const d = t.draftOutcome!;
+              return (
+                <tr key={t.id} className="hover:bg-violet/[0.04]">
+                  <td className="px-4 py-3 align-top">
+                    <button onClick={() => onSelect(t.id)} className="text-foreground font-medium hover:text-violet text-left">
+                      {t.title}
+                    </button>
+                    {t.intentTag && <div className="text-[10px] uppercase tracking-[0.12em] text-cyan mt-0.5">{t.intentTag}</div>}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    {d.writes.length === 0 ? (
+                      <span className="text-muted text-[11px]">—</span>
+                    ) : (
+                      <ul className="space-y-0.5">
+                        {d.writes.map((w) => (
+                          <li key={w.key} className="text-[11px] text-muted">
+                            <code className="text-foreground">{w.key}</code> = <code>{formatValue(w.value)}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 align-top tabular-nums text-[12px]">
+                    {Math.round(d.confidence * 100)}%
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    {d.caveats.length === 0 ? (
+                      <span className="text-muted text-[11px]">none</span>
+                    ) : (
+                      <ul className="space-y-0.5">
+                        {d.caveats.map((c, i) => (
+                          <li key={i} className="text-[11px] text-warm">⚠ {c}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onSelect(t.id)}
+                        className="border border-border w-7 h-7 flex items-center justify-center text-muted hover:text-violet hover:border-violet transition-colors"
+                        title="View"
+                      >
+                        <Eye size={11} />
+                      </button>
+                      <button
+                        onClick={() => onCommit(t.id)}
+                        className="border border-border w-7 h-7 flex items-center justify-center text-muted hover:text-green hover:border-green transition-colors"
+                        title="Verify & Commit"
+                      >
+                        <CheckCircle2 size={11} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ─────── Watcher tab ─────── */
+
+function WatcherPanel({
+  ctx,
+  history,
+  onShiftSalary,
+  onDeleteRunway,
+  onResetCtx,
+}: {
+  ctx: ProjectContext | null;
+  history: RebranchResult[];
+  onShiftSalary: () => void;
+  onDeleteRunway: () => void;
+  onResetCtx: () => void;
+}) {
+  return (
+    <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">Mutate project · watch rebranch</p>
+        <div className="border border-border bg-surface divide-y divide-border">
+          <MutatorRow
+            title="Shift senior salary +40%"
+            subtitle="Triggers rebranch of comp-bound subtasks."
+            onClick={onShiftSalary}
+            disabled={!ctx}
+          />
+          <MutatorRow
+            title="Delete runway assertion"
+            subtitle="Causes the runway-check subtask to revert to pending."
+            onClick={onDeleteRunway}
+            disabled={!ctx}
+          />
+          <MutatorRow
+            title="Reset context"
+            subtitle="Restores the demo data."
+            onClick={onResetCtx}
+          />
+        </div>
+      </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3 flex items-center gap-2">
+          <History size={11} />
+          Rebranch history · last {history.length}
+        </p>
+        <div className="border border-border bg-surface max-h-[480px] overflow-y-auto">
+          {history.length === 0 ? (
+            <div className="px-4 py-5 text-center text-[12px] text-muted">No rebranches yet.</div>
+          ) : history.map((r, i) => (
+            <div key={i} className="px-4 py-3 border-b last:border-b-0 border-border">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums mb-1">
+                {new Date(r.ranAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+              </div>
+              <div className="text-[12px] flex flex-wrap gap-x-3 gap-y-0.5">
+                {r.added.length > 0 && <span className="text-green">+{r.added.length} added</span>}
+                {r.removed.length > 0 && <span className="text-rose">-{r.removed.length} removed</span>}
+                {r.statusChanged.length > 0 && <span className="text-violet">{r.statusChanged.length} status</span>}
+                {r.draftsRefreshed.length > 0 && <span className="text-cyan">{r.draftsRefreshed.length} drafts</span>}
+                {r.blocked.length > 0 && <span className="text-warm">{r.blocked.length} blocked</span>}
+                {r.added.length === 0 && r.removed.length === 0 && r.statusChanged.length === 0 && r.draftsRefreshed.length === 0 && (
+                  <span className="text-muted">no-op</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -347,24 +742,59 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "vio
   );
 }
 
-function TaskRow({ task, index, onSelect, onToggleLock, onCommit }: {
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-background/55 text-[10px] uppercase tracking-[0.12em] font-medium">{k}</span>
+      <span className="text-background tabular-nums truncate">{v}</span>
+    </div>
+  );
+}
+
+function MutatorRow({ title, subtitle, onClick, disabled }: { title: string; subtitle: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="block w-full text-left px-4 py-3 hover:bg-violet/[0.06] disabled:opacity-50 transition-colors"
+    >
+      <div className="text-[12.5px] font-medium text-foreground">{title}</div>
+      <div className="text-[11px] text-muted">{subtitle}</div>
+    </button>
+  );
+}
+
+/* ─────── TaskRow ─────── */
+
+function TaskRow({
+  task, index, depth, tree, ctx,
+  onSelect, onToggleLock, onCommit, onTreeChange,
+}: {
   task: AtomicSubtask;
   index: number;
-  onSelect: () => void;
-  onToggleLock: () => void;
-  onCommit: () => void;
+  depth: number;
+  tree: TaskTree;
+  ctx: ProjectContext | null;
+  onSelect: (id: TaskId) => void;
+  onToggleLock: (id: TaskId) => void;
+  onCommit: (id: TaskId) => void;
+  onTreeChange: (next: TaskTree) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[task.status];
   const Icon = meta.icon;
+  const children = (tree.childrenOf.get(task.id) ?? [])
+    .map((id) => tree.tasks.get(id))
+    .filter((x): x is AtomicSubtask => !!x);
+
   return (
     <motion.li
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, delay: index * 0.02, ease }}
+      transition={{ duration: 0.22, delay: Math.min(index, 12) * 0.015, ease }}
       className={`py-4 ${task.status === "irrelevant" ? "opacity-55" : ""}`}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-4" style={{ paddingLeft: depth * 24 }}>
         <span className="font-display font-bold text-muted text-[13px] tabular-nums tracking-tight pt-0.5 shrink-0 w-8">
           {String(index).padStart(2, "0")}
         </span>
@@ -389,13 +819,18 @@ function TaskRow({ task, index, onSelect, onToggleLock, onCommit }: {
                 <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">draft {Math.round(task.draftOutcome.confidence * 100)}%</span>
               </>
             )}
+            {children.length > 0 && (
+              <>
+                <span className="text-[10px] text-muted">·</span>
+                <span className="text-[10px] uppercase tracking-[0.12em] text-violet font-medium">{children.length} sub-subtasks</span>
+              </>
+            )}
           </div>
-          <button onClick={onSelect} className="text-left mt-1 font-display font-bold text-foreground text-[16px] sm:text-[17px] tracking-[-0.018em] leading-tight hover:text-violet transition-colors">
+          <button onClick={() => onSelect(task.id)} className="text-left mt-1 font-display font-bold text-foreground text-[16px] sm:text-[17px] tracking-[-0.018em] leading-tight hover:text-violet transition-colors">
             {task.title}
           </button>
           {task.description && <p className="text-[12.5px] text-muted leading-relaxed mt-1">{task.description}</p>}
 
-          {/* Bindings */}
           {(task.boundAssertionKeys.length > 0 || task.boundDocumentIds.length > 0) && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {task.boundAssertionKeys.map((k) => (
@@ -442,19 +877,40 @@ function TaskRow({ task, index, onSelect, onToggleLock, onCommit }: {
                   )}
                 </div>
               )}
+              {/* Recursive decomposition is wired in TASK 7. */}
             </div>
+          )}
+
+          {/* Children (recursive) */}
+          {children.length > 0 && (
+            <ul className="mt-3 border-t border-border divide-y divide-border">
+              {children.map((c, ci) => (
+                <TaskRow
+                  key={c.id}
+                  task={c}
+                  index={ci + 1}
+                  depth={depth + 1}
+                  tree={tree}
+                  ctx={ctx}
+                  onSelect={onSelect}
+                  onToggleLock={onToggleLock}
+                  onCommit={onCommit}
+                  onTreeChange={onTreeChange}
+                />
+              ))}
+            </ul>
           )}
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={onCommit}
+            onClick={() => onCommit(task.id)}
             title="Verify & Commit"
             className="border border-border w-7 h-7 flex items-center justify-center text-muted hover:text-green hover:border-green transition-colors"
           >
             <CheckCircle2 size={12} />
           </button>
           <button
-            onClick={onToggleLock}
+            onClick={() => onToggleLock(task.id)}
             title={task.userLocked ? "Unlock" : "Lock"}
             className={`border w-7 h-7 flex items-center justify-center transition-colors ${task.userLocked ? "border-cyan text-cyan" : "border-border text-muted hover:text-cyan hover:border-cyan"}`}
           >
@@ -487,7 +943,7 @@ function ConditionTree({ condition, depth }: { condition: ResolutionCondition; d
     case "assertion-value":
       return <p style={indent} className="text-foreground"><span className="text-cyan">value</span> <code className="text-[11px]">{condition.assertionKey}</code> {condition.range ? `${condition.range.min ?? "·"} … ${condition.range.max ?? "·"}` : ""}</p>;
     case "document-section":
-      return <p style={indent} className="text-foreground"><span className="text-cyan">section</span> <code className="text-[11px]">{condition.documentId}</code> contains heading "{condition.headingMatches}"</p>;
+      return <p style={indent} className="text-foreground"><span className="text-cyan">section</span> <code className="text-[11px]">{condition.documentId}</code> contains heading &quot;{condition.headingMatches}&quot;</p>;
     case "document-mentions":
       return <p style={indent} className="text-foreground"><span className="text-cyan">mentions</span> <code className="text-[11px]">{condition.documentId}</code> matches /{condition.pattern}/</p>;
     case "task-complete":
@@ -509,152 +965,6 @@ function ConditionTree({ condition, depth }: { condition: ResolutionCondition; d
         </div>
       );
   }
-}
-
-function IntentCard({ intent }: { intent: ParsedIntent }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.08, ease }}
-      className="border border-border bg-foreground text-background p-5 relative overflow-hidden"
-    >
-      <span aria-hidden className="absolute top-0 left-0 w-[2px] h-full bg-violet" />
-      <div className="flex items-center gap-2 mb-3">
-        <Sparkles size={12} strokeWidth={2.25} className="text-violet" />
-        <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium">Parsed intent</span>
-      </div>
-      <div className="space-y-2 text-[12.5px]">
-        <Row k="Kind" v={intent.kind} />
-        <Row k="Verb" v={intent.verb || "—"} />
-        <Row k="Object" v={intent.object || "—"} />
-        <Row k="Quantity" v={intent.quantity != null ? String(intent.quantity) : "—"} />
-        <Row k="By date" v={intent.byDate ?? "—"} />
-        <Row k="Confidence" v={`${Math.round(intent.confidence * 100)}%`} />
-      </div>
-      {intent.unresolved.length > 0 && (
-        <ul className="mt-3 space-y-0.5">
-          {intent.unresolved.map((u, i) => (
-            <li key={i} className="text-[11px] text-warm">⚠ {u}</li>
-          ))}
-        </ul>
-      )}
-    </motion.div>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between gap-2">
-      <span className="text-background/55 text-[10px] uppercase tracking-[0.12em] font-medium">{k}</span>
-      <span className="text-background tabular-nums truncate">{v}</span>
-    </div>
-  );
-}
-
-function ContextMutator({ ctx, onShiftSalary, onDeleteRunway, onResetCtx }: {
-  ctx: ProjectContext | null;
-  onShiftSalary: () => void;
-  onDeleteRunway: () => void;
-  onResetCtx: () => void;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.16, ease }}
-    >
-      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">Mutate project · watch rebranch</p>
-      <div className="border border-border bg-surface divide-y divide-border">
-        <MutatorRow
-          title="Shift senior salary +40%"
-          subtitle="Triggers rebranch of comp-bound subtasks."
-          onClick={onShiftSalary}
-          disabled={!ctx}
-        />
-        <MutatorRow
-          title="Delete runway assertion"
-          subtitle="Causes the runway-check subtask to revert to pending."
-          onClick={onDeleteRunway}
-          disabled={!ctx}
-        />
-        <MutatorRow
-          title="Reset context"
-          subtitle="Restores the demo data."
-          onClick={onResetCtx}
-        />
-      </div>
-    </motion.div>
-  );
-}
-
-function MutatorRow({ title, subtitle, onClick, disabled }: { title: string; subtitle: string; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="block w-full text-left px-4 py-3 hover:bg-violet/[0.06] disabled:opacity-50 transition-colors"
-    >
-      <div className="text-[12.5px] font-medium text-foreground">{title}</div>
-      <div className="text-[11px] text-muted">{subtitle}</div>
-    </button>
-  );
-}
-
-function RebranchHistory({ history }: { history: RebranchResult[] }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.24, ease }}
-    >
-      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">Rebranch log</p>
-      <div className="border border-border bg-surface">
-        {history.length === 0 ? (
-          <div className="px-4 py-5 text-center text-[12px] text-muted">No rebranches yet.</div>
-        ) : history.map((r, i) => (
-          <div key={i} className="px-4 py-3 border-b last:border-b-0 border-border">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums mb-1">
-              {new Date(r.ranAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
-            </div>
-            <div className="text-[12px] flex flex-wrap gap-x-3 gap-y-0.5">
-              {r.added.length > 0 && <span className="text-green">+{r.added.length} added</span>}
-              {r.removed.length > 0 && <span className="text-rose">-{r.removed.length} removed</span>}
-              {r.statusChanged.length > 0 && <span className="text-violet">{r.statusChanged.length} status</span>}
-              {r.draftsRefreshed.length > 0 && <span className="text-cyan">{r.draftsRefreshed.length} drafts</span>}
-              {r.blocked.length > 0 && <span className="text-warm">{r.blocked.length} blocked</span>}
-              {r.added.length === 0 && r.removed.length === 0 && r.statusChanged.length === 0 && r.draftsRefreshed.length === 0 && (
-                <span className="text-muted">no-op</span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
-
-function PrincipleCard() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.32, ease }}
-      className="border border-border bg-foreground text-background p-5 relative overflow-hidden"
-    >
-      <span aria-hidden className="absolute top-0 left-0 w-[2px] h-full bg-cyan" />
-      <div className="flex items-center gap-2 mb-3">
-        <Network size={12} strokeWidth={2} className="text-cyan" />
-        <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium">The principle</span>
-      </div>
-      <h3 className="font-display font-bold text-[18px] tracking-[-0.018em] leading-[1.2] mb-3">
-        Tasks aren&apos;t a list. They&apos;re a <span className="text-cyan">function of state</span>.
-      </h3>
-      <p className="text-[13px] text-background/70 leading-relaxed">
-        Change the data and the task tree changes with it. Done-ness is a query against the project, not a checkbox.
-      </p>
-    </motion.div>
-  );
 }
 
 function TaskDrawer({ task, onClose }: { task: AtomicSubtask; onClose: () => void }) {
@@ -719,8 +1029,7 @@ function TaskDrawer({ task, onClose }: { task: AtomicSubtask; onClose: () => voi
   );
 }
 
-function formatValue(v: AtomicSubtask["draftOutcome"] extends infer T ? T extends { writes: infer W } ? W extends Array<infer Item> ? Item extends { value: infer V } ? V : never : never : never : never): string {
-  if (!v) return "—";
+function formatValue(v: DraftAssertionWrite["value"]): string {
   switch (v.type) {
     case "number": return `${v.value.toLocaleString()}${v.unit ? " " + v.unit : ""}`;
     case "string": return `"${v.value}"`;
@@ -729,7 +1038,4 @@ function formatValue(v: AtomicSubtask["draftOutcome"] extends infer T ? T extend
   }
 }
 
-// resolveTree is exported but we don't call it directly here — the
-// watcher handles resolution internally. Suppress the unused warning at
-// the import level by referencing it once:
 void resolveTree;
