@@ -47,6 +47,7 @@ import {
   type TrustSnapshot,
 } from "@/lib/pulse";
 import { RefactorReview } from "@/components/pulse/RefactorReview";
+import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -195,6 +196,24 @@ export default function PulsePage() {
   const invalidated = run ? run.diffs.filter((d) => d.status === "invalidated") : [];
   const stale       = run ? run.diffs.filter((d) => d.status === "stale") : [];
   const fresh       = run ? run.diffs.filter((d) => d.status === "fresh") : [];
+
+  // Surface refactor proposals in the command palette.
+  const refactorCommands = useMemo<CommandItem[]>(() => {
+    if (!run) return [];
+    return run.refactorProposals.map((p) => {
+      const a = p.triggeredBy.map((id) => assertionMap.get(id)).filter(Boolean) as Assertion[];
+      return {
+        id: makeCommandId("pulse.refactor", `${p.blockId}_${p.triggeredBy.join(",")}`),
+        kind: "refactor" as const,
+        label: `Refactor ${p.blockId}`,
+        subtitle: `${p.kind === "value-swap" ? "Safe swap" : "Needs review"} · ${a.map((x) => x.label).join(", ")}`,
+        keywords: a.flatMap((x) => [x.label, x.key, x.documentId]),
+        href: "/pulse",
+        anchor: `refactor-${p.blockId}`,
+      };
+    });
+  }, [run, assertionMap]);
+  useRegisterCommandSource("pulse.refactors", refactorCommands);
 
   return (
     <div className="min-h-full bg-background">

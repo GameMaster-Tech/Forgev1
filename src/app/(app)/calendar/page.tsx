@@ -65,6 +65,7 @@ import {
   type StreakResult,
 } from "@/lib/scheduler";
 import { useCalendarStream } from "@/hooks/useCalendarStream";
+import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
 import { RealtimeIndicator } from "@/components/calendar/RealtimeIndicator";
 import { HabitsPanel } from "@/components/calendar/HabitsPanel";
 import { GoalsPanel } from "@/components/calendar/GoalsPanel";
@@ -177,6 +178,21 @@ export default function CalendarPage() {
   }, [scheduleBundle]);
 
   const allEvents = useMemo(() => [...events, ...systemEvents], [events, systemEvents]);
+
+  // Register calendar events in the command palette.
+  const eventCommands = useMemo<CommandItem[]>(() => {
+    return allEvents.map((e) => ({
+      id: makeCommandId("calendar.event", e.id),
+      kind: "calendar-event" as const,
+      label: e.title,
+      subtitle: `${e.kind} · ${new Date(e.start).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+      keywords: [e.kind, e.source ?? "", ...(e.attendees?.map((a) => a.email).filter((s): s is string => !!s) ?? [])],
+      href: "/calendar",
+      anchor: `event-${e.id}`,
+      recencyAt: e.start,
+    }));
+  }, [allEvents]);
+  useRegisterCommandSource("calendar.events", eventCommands);
 
   const handleConnectGoogle = async () => {
     setLoading(true);

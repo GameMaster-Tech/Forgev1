@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Sidebar from "@/components/app/Sidebar";
 import NewProjectModal from "@/components/app/NewProjectModal";
+import { CommandPalette } from "@/components/palette/CommandPalette";
 
 /**
  * AppShell — floating dark sidebar + cream canvas.
@@ -26,6 +27,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         open={showNewProject}
         onClose={() => setShowNewProject(false)}
       />
+      <CommandPalette />
     </div>
   );
 }

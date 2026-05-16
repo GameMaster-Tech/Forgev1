@@ -10,6 +10,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitBranch,
@@ -96,6 +97,32 @@ export default function SyncPage() {
   const docs = graph.listDocuments();
   const allViolations = currentViolations(graph);
   const assertionsById = mapAssertions(graph.listAssertions());
+
+  // Register assertion + document items with the command palette.
+  const assertionItems = useMemo<CommandItem[]>(() => {
+    return graph.listAssertions().map((a) => ({
+      id: makeCommandId("sync.assertion", a.id),
+      kind: "assertion",
+      label: a.label,
+      subtitle: `${a.key} · ${a.kind}`,
+      keywords: [a.key, a.kind, a.documentId, a.source ?? ""],
+      href: "/sync",
+      anchor: `assertion-${a.id}`,
+    }));
+  }, [graph]);
+  const documentItems = useMemo<CommandItem[]>(() => {
+    return docs.map((d) => ({
+      id: makeCommandId("sync.document", d.id),
+      kind: "document",
+      label: d.title,
+      subtitle: `${d.type} · ${d.assertionIds.length} variables`,
+      keywords: [d.type, d.id],
+      href: "/sync",
+      anchor: `doc-${d.id}`,
+    }));
+  }, [docs]);
+  useRegisterCommandSource("sync.assertions", assertionItems);
+  useRegisterCommandSource("sync.documents", documentItems);
 
   return (
     <div className="min-h-full bg-background">

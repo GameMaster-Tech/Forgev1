@@ -59,6 +59,7 @@ import {
   type TaskTree,
 } from "@/lib/lattice";
 import { useAuth } from "@/context/AuthContext";
+import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -219,6 +220,28 @@ export default function LatticePage() {
     for (const t of topLevelSubtasks) c[t.status]++;
     return c;
   }, [topLevelSubtasks]);
+
+  // Surface every non-irrelevant subtask in the command palette.
+  const taskCommands = useMemo<CommandItem[]>(() => {
+    if (!tree) return [];
+    return Array.from(tree.tasks.values())
+      .filter((t) => t.status !== "irrelevant" && t.parentId != null)
+      .map((t) => ({
+        id: makeCommandId("lattice.task", t.id),
+        kind: "lattice-task" as const,
+        label: t.title,
+        subtitle: `${t.status} · depth ${t.depth}${t.intentTag ? ` · ${t.intentTag}` : ""}`,
+        keywords: [
+          ...t.boundAssertionKeys,
+          ...t.boundDocumentIds,
+          t.intentTag ?? "",
+          t.description ?? "",
+        ],
+        href: "/lattice",
+        anchor: `task-${t.id}`,
+      }));
+  }, [tree]);
+  useRegisterCommandSource("lattice.tasks", taskCommands);
 
   function mutateAssertion(key: string, deltaPct: number) {
     if (!ctx || !watcherRef.current) return;
