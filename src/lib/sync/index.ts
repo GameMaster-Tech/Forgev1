@@ -29,3 +29,14 @@ export type { MarketQuote, MarketQuery } from "./market";
 
 // Demo fixtures — a Budget vs Hiring paradox the UI can render out of the box.
 export { buildDemoGraph } from "./demo";
+
+// Undo log for applied patches.
+export {
+  UNDO_BUFFER_SIZE,
+  captureUndo,
+  formatUndoTimestamp,
+  pushUndo,
+  revertLast,
+  undoSize,
+} from "./undo";
+export type { UndoEntry } from "./undo";

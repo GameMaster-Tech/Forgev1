@@ -23,6 +23,8 @@ import {
   ShieldCheck,
   Loader2,
   RotateCcw,
+  Undo2,
+  History,
 } from "lucide-react";
 import {
   buildDemoGraph,
@@ -31,11 +33,16 @@ import {
   proposePatch,
   applyPatch,
   DependencyGraph,
+  captureUndo,
+  pushUndo,
+  revertLast,
+  formatUndoTimestamp,
   type LogicalPatch,
   type StabilityReport,
   type Violation,
   type Assertion,
   type DocumentNode,
+  type UndoEntry,
 } from "@/lib/sync";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
@@ -44,6 +51,7 @@ export default function SyncPage() {
   const [graph, setGraph] = useState<DependencyGraph>(() => buildDemoGraph());
   const [patch, setPatch] = useState<LogicalPatch | null>(null);
   const [computing, setComputing] = useState(false);
+  const [undoLog, setUndoLog] = useState<UndoEntry[]>([]);
 
   const report = useMemo<StabilityReport>(() => checkStability(graph), [graph]);
 
@@ -61,14 +69,28 @@ export default function SyncPage() {
   const handleApply = () => {
     if (!patch) return;
     const clone = cloneGraph(graph);
+    // Capture the undo entry from the PRE-apply state (clone still has
+    // the original values) before we mutate it.
+    const entry = captureUndo(clone, patch);
     applyPatch(clone, patch);
     setGraph(clone);
+    setUndoLog((prev) => pushUndo(prev, entry));
+    setPatch(null);
+  };
+
+  const handleUndo = () => {
+    if (undoLog.length === 0) return;
+    const clone = cloneGraph(graph);
+    const { buffer } = revertLast(clone, undoLog);
+    setGraph(clone);
+    setUndoLog(buffer);
     setPatch(null);
   };
 
   const handleReset = () => {
     setGraph(buildDemoGraph());
     setPatch(null);
+    setUndoLog([]);
   };
 
   const docs = graph.listDocuments();
@@ -235,7 +257,8 @@ export default function SyncPage() {
 
         {/* Rail */}
         <aside className="col-span-12 lg:col-span-4 px-6 sm:px-10 pt-8 pb-16 space-y-6">
-          <VerdictCard report={report} />
+          <VerdictCard report={report} undoCount={undoLog.length} onUndo={handleUndo} />
+          <UndoLog entries={undoLog} />
           <DocumentLegend docs={docs} assertions={graph.listAssertions()} />
           <PrincipleCard />
         </aside>
@@ -330,7 +353,7 @@ function ViolationRow({ v, index, assertions }: { v: Violation; index: number; a
   );
 }
 
-function VerdictCard({ report }: { report: StabilityReport }) {
+function VerdictCard({ report, undoCount, onUndo }: { report: StabilityReport; undoCount: number; onUndo: () => void }) {
   const stable = report.isStable;
   return (
     <motion.div
@@ -357,6 +380,50 @@ function VerdictCard({ report }: { report: StabilityReport }) {
       <p className={`text-[10px] uppercase tracking-[0.15em] mt-3 ${stable ? "text-background/45" : "text-muted"} font-medium tabular-nums`}>
         Last linted {new Date(report.ranAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
       </p>
+      {undoCount > 0 && (
+        <button
+          onClick={onUndo}
+          className={`mt-4 w-full flex items-center justify-center gap-2 border ${stable ? "border-white/[0.12] text-background hover:border-violet hover:text-violet" : "border-border text-foreground hover:border-violet hover:text-violet"} text-[11px] font-semibold uppercase tracking-[0.12em] px-4 py-2.5 transition-colors duration-150`}
+          aria-label="Undo last applied patch"
+        >
+          <Undo2 size={12} strokeWidth={2.25} />
+          Undo last patch
+        </button>
+      )}
+    </motion.div>
+  );
+}
+
+function UndoLog({ entries }: { entries: UndoEntry[] }) {
+  if (entries.length === 0) return null;
+  const reversed = [...entries].reverse(); // newest first
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: 0.14, ease }}
+    >
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3 flex items-center gap-2">
+        <History size={11} strokeWidth={1.75} />
+        Audit trail · {entries.length} applied patch{entries.length === 1 ? "" : "es"}
+      </p>
+      <ol className="border border-border bg-surface divide-y divide-border">
+        {reversed.map((e, i) => (
+          <li key={`${e.id}-${e.appliedAt}`} className="px-4 py-3">
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums">
+                #{reversed.length - i}
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums">
+                {formatUndoTimestamp(e.appliedAt)}
+              </span>
+            </div>
+            <p className="text-[12px] text-foreground leading-relaxed line-clamp-2 break-words">
+              {e.summary || `${e.changedCount} change${e.changedCount === 1 ? "" : "s"}`}
+            </p>
+          </li>
+        ))}
+      </ol>
     </motion.div>
   );
 }
