@@ -33,3 +33,12 @@ export {
 } from "./reality";
 export { runSync, scheduleSync, defaultConfig } from "./schedule";
 export { buildDemoBlocks } from "./demo";
+
+export {
+  REJECTION_TTL_DAYS,
+  REJECTION_TTL_MS,
+  filterRejected,
+  pruneRejections,
+  rejectionKey,
+  rejectionKeyOf,
+} from "./rejection";

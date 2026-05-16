@@ -31,9 +31,14 @@ import {
   buildDemoBlocks,
   defaultConfig,
   defaultRegistry,
+  filterRejected,
+  pruneRejections,
+  rejectionKeyOf,
+  REJECTION_TTL_MS,
   runSync,
   snapshot as trustSnapshot,
   type Cadence,
+  type ContentBlock,
   type OracleContribution,
   type PulseConfig,
   type RealityDiff,
@@ -41,6 +46,7 @@ import {
   type SyncRun,
   type TrustSnapshot,
 } from "@/lib/pulse";
+import { RefactorReview } from "@/components/pulse/RefactorReview";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -60,11 +66,17 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function PulsePage() {
   const [graph] = useState(() => buildDemoGraph());
-  const [blocks] = useState(() => buildDemoBlocks());
+  // Blocks live in state so accepting a refactor mutates the rendered
+  // document body. The blocks array is the source of truth for the
+  // Pulse run input.
+  const [blocks, setBlocks] = useState<ContentBlock[]>(() => buildDemoBlocks());
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [running, setRunning] = useState(false);
   const [run, setRun] = useState<SyncRun | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  // Map of rejection-key → expiresAt (ms epoch). Persisted across
+  // re-runs so the same proposal doesn't reappear within the TTL.
+  const [rejections, setRejections] = useState<Map<string, number>>(() => new Map());
 
   const assertions = useMemo(() => graph.listAssertions(), [graph]);
   const assertionMap = useMemo(
@@ -76,11 +88,20 @@ export default function PulsePage() {
     [assertions],
   );
 
+  // Sweep expired rejections each render so stale entries don't pile up.
+  useEffect(() => {
+    setRejections((prev) => {
+      const pruned = pruneRejections(prev);
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [run]);
+
   const handleRun = async () => {
     setRunning(true);
     const config: Partial<PulseConfig> = { ...defaultConfig(graph.projectId), cadence };
     const registry = defaultRegistry(2026);
     const next = await runSync({ assertions, blocks, oracle: registry, config });
+    next.refactorProposals = filterRejected(next.refactorProposals, rejections);
     setRun(next);
     setRunning(false);
   };
@@ -91,14 +112,85 @@ export default function PulsePage() {
       const registry = defaultRegistry(2026);
       const next = await runSync({
         assertions: graph.listAssertions(),
-        blocks: buildDemoBlocks(),
+        blocks,
         oracle: registry,
         config: { ...defaultConfig(graph.projectId), cadence: "weekly" },
       });
-      if (!cancelled) setRun(next);
+      if (cancelled) return;
+      next.refactorProposals = filterRejected(next.refactorProposals, rejections);
+      setRun(next);
     })();
     return () => { cancelled = true; };
-  }, [graph]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, blocks]);
+
+  const handleAccept = async (proposal: RefactorProposal) => {
+    // 1) Persist the new body into the in-page blocks state. This
+    //    immediately mutates the rendered document.
+    setBlocks((prev) => prev.map((b) => (b.id === proposal.blockId ? { ...b, body: proposal.after } : b)));
+    // 2) Remove the proposal from the current run so the queue updates.
+    setRun((prev) => (prev ? {
+      ...prev,
+      refactorProposals: prev.refactorProposals.filter((p) => p.blockId !== proposal.blockId || rejectionKeyOf(p) !== rejectionKeyOf(proposal)),
+    } : prev));
+    // 3) Fire the persist API in the background — best-effort. The UI
+    //    doesn't block on it, but errors are surfaced via console for
+    //    QA + observability.
+    try {
+      await fetch("/api/pulse/refactor/accept", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: graph.projectId,
+          blockId: proposal.blockId,
+          documentId: proposal.documentId,
+          body: proposal.after,
+          triggeredBy: proposal.triggeredBy,
+          kind: proposal.kind,
+        }),
+      });
+    } catch (err) {
+      console.warn("[pulse] accept persist failed (non-fatal):", err);
+    }
+  };
+
+  const handleReject = async (proposal: RefactorProposal) => {
+    const key = rejectionKeyOf(proposal);
+    const expiresAt = Date.now() + REJECTION_TTL_MS;
+    setRejections((prev) => {
+      const next = new Map(prev);
+      next.set(key, expiresAt);
+      return next;
+    });
+    setRun((prev) => (prev ? {
+      ...prev,
+      refactorProposals: prev.refactorProposals.filter((p) => rejectionKeyOf(p) !== key),
+    } : prev));
+    try {
+      await fetch("/api/pulse/refactor/reject", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: graph.projectId,
+          blockId: proposal.blockId,
+          documentId: proposal.documentId,
+          triggeredBy: proposal.triggeredBy,
+        }),
+      });
+    } catch (err) {
+      console.warn("[pulse] reject persist failed (non-fatal):", err);
+    }
+  };
+
+  const handleSkip = (proposal: RefactorProposal) => {
+    // Skip = leave the proposal in the queue. We just remove it from
+    // the *current* run's list so the user sees their action; the
+    // next Pulse run will re-emit it.
+    setRun((prev) => (prev ? {
+      ...prev,
+      refactorProposals: prev.refactorProposals.filter((p) => p !== proposal),
+    } : prev));
+  };
 
   const invalidated = run ? run.diffs.filter((d) => d.status === "invalidated") : [];
   const stale       = run ? run.diffs.filter((d) => d.status === "stale") : [];
@@ -201,7 +293,15 @@ export default function PulsePage() {
           >
             {tab === "overview"  && <OverviewPanel run={run} snapshots={snapshots} assertions={assertionMap} onJumpToDiffs={() => setTab("diffs")} onJumpToRefactors={() => setTab("refactors")} />}
             {tab === "diffs"     && <DiffsPanel run={run} assertions={assertionMap} />}
-            {tab === "refactors" && <RefactorsPanel run={run} assertions={assertionMap} />}
+            {tab === "refactors" && (
+              <RefactorsPanel
+                run={run}
+                assertions={assertionMap}
+                onAccept={handleAccept}
+                onReject={handleReject}
+                onSkip={handleSkip}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -390,7 +490,19 @@ function ContributionBreakdown({ contributions }: { contributions: OracleContrib
 
 /* ─────── Refactors panel ─────── */
 
-function RefactorsPanel({ run, assertions }: { run: SyncRun | null; assertions: Map<AssertionId, Assertion> }) {
+function RefactorsPanel({
+  run,
+  assertions,
+  onAccept,
+  onReject,
+  onSkip,
+}: {
+  run: SyncRun | null;
+  assertions: Map<AssertionId, Assertion>;
+  onAccept: (p: RefactorProposal) => void | Promise<void>;
+  onReject: (p: RefactorProposal) => void | Promise<void>;
+  onSkip: (p: RefactorProposal) => void;
+}) {
   if (!run) return null;
   if (run.refactorProposals.length === 0) {
     return (
@@ -402,45 +514,23 @@ function RefactorsPanel({ run, assertions }: { run: SyncRun | null; assertions: 
   }
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">Proposed document refactor · {run.refactorProposals.length} blocks</p>
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">
+        Proposed document refactor · {run.refactorProposals.length} block{run.refactorProposals.length === 1 ? "" : "s"} pending review
+      </p>
       <div className="space-y-6">
-        {run.refactorProposals.map((p) => (
-          <RefactorCard key={p.blockId} proposal={p} assertions={assertions} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RefactorCard({ proposal, assertions }: { proposal: RefactorProposal; assertions: Map<AssertionId, Assertion> }) {
-  const triggers = proposal.triggeredBy.map((id) => assertions.get(id)).filter(Boolean) as Assertion[];
-  return (
-    <div className="border border-violet bg-foreground text-background relative overflow-hidden">
-      <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-violet" />
-      <div className="px-5 py-3 border-b border-white/[0.08] flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText size={12} strokeWidth={2} className="text-violet shrink-0" />
-          <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium truncate">Refactor · {proposal.documentId} · {proposal.kind === "value-swap" ? "safe swap" : "needs review"}</span>
-        </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {triggers.map((a) => (
-            <span key={a.id} className="text-[10px] uppercase tracking-[0.12em] border border-white/[0.1] bg-white/[0.04] text-background/70 px-2 py-1 font-medium">{a.label}</span>
+        <AnimatePresence initial={false}>
+          {run.refactorProposals.map((p, i) => (
+            <RefactorReview
+              key={`${p.blockId}::${p.triggeredBy.join(",")}`}
+              proposal={p}
+              assertions={assertions}
+              onAccept={onAccept}
+              onReject={onReject}
+              onSkip={onSkip}
+              index={i}
+            />
           ))}
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/[0.06]">
-        <div className="p-5">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-rose font-semibold mb-2 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-rose" /> Before
-          </div>
-          <pre className="text-[13px] text-background/65 leading-relaxed whitespace-pre-wrap font-sans">{proposal.before}</pre>
-        </div>
-        <div className="p-5">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-green font-semibold mb-2 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-green" /> After
-          </div>
-          <pre className="text-[13px] text-background leading-relaxed whitespace-pre-wrap font-sans">{proposal.after}</pre>
-        </div>
+        </AnimatePresence>
       </div>
     </div>
   );
