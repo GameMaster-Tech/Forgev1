@@ -48,6 +48,8 @@ import {
 } from "@/lib/pulse";
 import { RefactorReview } from "@/components/pulse/RefactorReview";
 import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
+import { recordActivity } from "@/lib/activity";
+import { useAuth } from "@/context/AuthContext";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -66,6 +68,7 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 export default function PulsePage() {
+  const { user } = useAuth();
   const [graph] = useState(() => buildDemoGraph());
   // Blocks live in state so accepting a refactor mutates the rendered
   // document body. The blocks array is the source of truth for the
@@ -105,6 +108,15 @@ export default function PulsePage() {
     next.refactorProposals = filterRejected(next.refactorProposals, rejections);
     setRun(next);
     setRunning(false);
+    recordActivity({
+      source: "pulse",
+      kind: "pulse.run",
+      title: "Pulse · reality-sync",
+      summary: `${next.invalidatedCount} invalidated · ${next.staleCount} stale · ${next.freshCount} fresh`,
+      projectId: graph.projectId,
+      uid: user?.uid,
+      detail: { ...next, diffs: next.diffs.length, refactors: next.refactorProposals.length },
+    });
   };
 
   useEffect(() => {
@@ -126,14 +138,20 @@ export default function PulsePage() {
   }, [graph, blocks]);
 
   const handleAccept = async (proposal: RefactorProposal) => {
-    // 1) Persist the new body into the in-page blocks state. This
-    //    immediately mutates the rendered document.
     setBlocks((prev) => prev.map((b) => (b.id === proposal.blockId ? { ...b, body: proposal.after } : b)));
-    // 2) Remove the proposal from the current run so the queue updates.
     setRun((prev) => (prev ? {
       ...prev,
       refactorProposals: prev.refactorProposals.filter((p) => p.blockId !== proposal.blockId || rejectionKeyOf(p) !== rejectionKeyOf(proposal)),
     } : prev));
+    recordActivity({
+      source: "pulse",
+      kind: "pulse.refactor.accept",
+      title: "Pulse · refactor accepted",
+      summary: `${proposal.kind === "value-swap" ? "Safe swap" : "Text rewrite"} on ${proposal.blockId}`,
+      projectId: graph.projectId,
+      uid: user?.uid,
+      detail: { blockId: proposal.blockId, triggers: proposal.triggeredBy },
+    });
     // 3) Fire the persist API in the background — best-effort. The UI
     //    doesn't block on it, but errors are surfaced via console for
     //    QA + observability.
@@ -167,6 +185,15 @@ export default function PulsePage() {
       ...prev,
       refactorProposals: prev.refactorProposals.filter((p) => rejectionKeyOf(p) !== key),
     } : prev));
+    recordActivity({
+      source: "pulse",
+      kind: "pulse.refactor.reject",
+      title: "Pulse · refactor rejected",
+      summary: `${proposal.kind === "value-swap" ? "Safe swap" : "Text rewrite"} on ${proposal.blockId} declined (7-day cooldown)`,
+      projectId: graph.projectId,
+      uid: user?.uid,
+      detail: { blockId: proposal.blockId, triggers: proposal.triggeredBy, expiresAt },
+    });
     try {
       await fetch("/api/pulse/refactor/reject", {
         method: "POST",

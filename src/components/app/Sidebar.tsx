@@ -23,6 +23,7 @@ import {
   GitBranch,
   Activity,
   Calendar,
+  History,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { motion } from "framer-motion";
@@ -36,6 +37,7 @@ const navItems: { href: string; icon: typeof Search; label: string }[] = [
   { href: "/sync", icon: GitBranch, label: "Sync" },
   { href: "/pulse", icon: Activity, label: "Pulse" },
   { href: "/calendar", icon: Calendar, label: "Calendar" },
+  { href: "/activity", icon: History, label: "Activity" },
   { href: "/teams", icon: Users, label: "Teams" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];

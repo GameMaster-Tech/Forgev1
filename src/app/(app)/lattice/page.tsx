@@ -60,6 +60,7 @@ import {
 } from "@/lib/lattice";
 import { useAuth } from "@/context/AuthContext";
 import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
+import { recordActivity } from "@/lib/activity";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -127,6 +128,15 @@ export default function LatticePage() {
       if (!mounted) return;
       setTree(w.getTree());
       setHistory((prev) => [r, ...prev].slice(0, 16));
+      recordActivity({
+        source: "lattice",
+        kind: "lattice.rebranch",
+        title: "Lattice · rebranched",
+        summary: `+${r.added.length} added · -${r.removed.length} removed · ${r.statusChanged.length} status`,
+        projectId: ctx?.projectId,
+        uid: user?.uid,
+        detail: { added: r.added.length, removed: r.removed.length, statusChanged: r.statusChanged.length, draftsRefreshed: r.draftsRefreshed.length, blocked: r.blocked.length },
+      });
     });
     w.flush().then((r) => {
       if (!mounted) return;
@@ -139,6 +149,9 @@ export default function LatticePage() {
       unsub();
       w.dispose();
     };
+    // user is captured by closure for the activity log only; we don't
+    // want to recreate the watcher on login/logout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, parentTask]);
 
   // ── Live Firestore subscription (TASK 6) ──

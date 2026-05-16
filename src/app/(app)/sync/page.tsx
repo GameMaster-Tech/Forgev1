@@ -11,6 +11,8 @@
 
 import { useMemo, useState } from "react";
 import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hooks/useCommandPalette";
+import { recordActivity } from "@/lib/activity";
+import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitBranch,
@@ -49,6 +51,7 @@ import {
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
 export default function SyncPage() {
+  const { user } = useAuth();
   const [graph, setGraph] = useState<DependencyGraph>(() => buildDemoGraph());
   const [patch, setPatch] = useState<LogicalPatch | null>(null);
   const [computing, setComputing] = useState(false);
@@ -58,34 +61,58 @@ export default function SyncPage() {
 
   const handleCompile = () => {
     setComputing(true);
-    // Run on next tick so the spinner can render — solver is sync but
-    // we want the UI to feel like it's working.
     setTimeout(() => {
       const next = proposePatch(graph, { now: Date.now() });
       setPatch(next);
       setComputing(false);
+      recordActivity({
+        source: "sync",
+        kind: "sync.compile",
+        title: "Sync · compiled",
+        summary: `${next.changes.length} proposed change${next.changes.length === 1 ? "" : "s"} · ${next.iterations} iter`,
+        projectId: graph.projectId,
+        uid: user?.uid,
+        detail: { reachesStable: next.reachesStableState, iterations: next.iterations },
+      });
     }, 350);
   };
 
   const handleApply = () => {
     if (!patch) return;
     const clone = cloneGraph(graph);
-    // Capture the undo entry from the PRE-apply state (clone still has
-    // the original values) before we mutate it.
     const entry = captureUndo(clone, patch);
     applyPatch(clone, patch);
     setGraph(clone);
     setUndoLog((prev) => pushUndo(prev, entry));
     setPatch(null);
+    recordActivity({
+      source: "sync",
+      kind: "sync.patch.apply",
+      title: "Sync · patch applied",
+      summary: patch.summary,
+      projectId: graph.projectId,
+      uid: user?.uid,
+      detail: { changeCount: patch.changes.length, patchId: patch.id },
+    });
   };
 
   const handleUndo = () => {
     if (undoLog.length === 0) return;
     const clone = cloneGraph(graph);
+    const last = undoLog[undoLog.length - 1];
     const { buffer } = revertLast(clone, undoLog);
     setGraph(clone);
     setUndoLog(buffer);
     setPatch(null);
+    recordActivity({
+      source: "sync",
+      kind: "sync.patch.undo",
+      title: "Sync · patch undone",
+      summary: last.summary,
+      projectId: graph.projectId,
+      uid: user?.uid,
+      detail: { patchId: last.id },
+    });
   };
 
   const handleReset = () => {
