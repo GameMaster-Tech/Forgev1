@@ -9,6 +9,7 @@ import Highlight from "@tiptap/extension-highlight";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
 import { InlineMath, BlockMath } from "./extensions/Math";
+import { ClaimMention, type ClaimTrustResolver } from "./extensions/ClaimMention";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Bold,
@@ -131,6 +132,12 @@ interface ForgeEditorProps {
   onUpdate?: (html: string) => void;
   onWordCountChange?: (count: number) => void;
   onReady?: (handle: EditorHandle) => void;
+  /**
+   * Optional Pulse-trust resolver for inline `[[claim:<key>]]` mentions.
+   * When supplied, pills colour themselves by the returned snapshot and
+   * the click tooltip surfaces the latest value + source + freshness.
+   */
+  resolveClaimTrust?: ClaimTrustResolver;
 }
 
 /* â”€â”€â”€ Toolbar button â”€â”€â”€ */
@@ -466,6 +473,7 @@ export default function ForgeEditor({
   onUpdate,
   onWordCountChange,
   onReady,
+  resolveClaimTrust,
 }: ForgeEditorProps) {
   const [isFocused, setIsFocused] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
@@ -473,6 +481,13 @@ export default function ForgeEditor({
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<AICommand | null>(null);
   const [selectedText, setSelectedText] = useState("");
+
+  // Use a ref so updates to the resolver propagate without recreating
+  // the editor (TipTap config is captured once at construction).
+  const claimResolverRef = useRef<ClaimTrustResolver | undefined>(resolveClaimTrust);
+  useEffect(() => {
+    claimResolverRef.current = resolveClaimTrust;
+  }, [resolveClaimTrust]);
 
   const editor = useEditor({
     extensions: [
@@ -499,6 +514,9 @@ export default function ForgeEditor({
       Typography,
       InlineMath,
       BlockMath,
+      ClaimMention.configure({
+        resolveTrust: (key) => claimResolverRef.current?.(key) ?? null,
+      }),
     ],
     content,
     immediatelyRender: false,
