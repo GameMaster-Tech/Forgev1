@@ -41,9 +41,10 @@ import type {
   TaskId,
   TaskTree,
 } from "./types";
+import { MAX_FANOUT, MAX_TREE_DEPTH } from "./types";
 
-const DEFAULT_MAX_DEPTH = 5;
-const DEFAULT_MAX_FANOUT = 12;
+const DEFAULT_MAX_DEPTH = MAX_TREE_DEPTH;
+const DEFAULT_MAX_FANOUT = MAX_FANOUT;
 
 /* ───────────── public entry ───────────── */
 
@@ -684,6 +685,239 @@ function andCond(conditions: ResolutionCondition[]): ResolutionCondition {
 /** Reserved for OR-composite use in templates. Currently no template wires this. */
 export function orCond(conditions: ResolutionCondition[]): ResolutionCondition {
   return { id: condId("or", 0), kind: "or", conditions };
+}
+
+/* ───────────── recursive sub-decomposition ───────────── */
+
+export interface DecomposeSubtaskOptions extends DecomposeOptions {
+  /** Override the parent's title used as the new sub-prompt. */
+  prompt?: string;
+}
+
+/**
+ * Decompose a single AtomicSubtask one level deeper. The subtask's
+ * title is fed back through `parseIntent` + `INTENT_TEMPLATES` to
+ * produce sub-subtasks, which are spliced into the tree as children
+ * of the target task.
+ *
+ * Rules:
+ *   • Respects MAX_TREE_DEPTH — refuses to descend if the parent is
+ *     already at depth ≥ maxDepth - 1.
+ *   • Idempotent for an unchanged context: re-decomposing the same
+ *     subtask preserves prior children whose signatures still appear
+ *     (so user edits aren't clobbered).
+ *   • Cycle-safe: child ids are freshly generated and parent links
+ *     are validated against the existing tree before the splice.
+ *
+ * Returns a fresh tree (cloneTree-based). The input tree is not
+ * mutated.
+ */
+export function decomposeSubtask(
+  taskId: TaskId,
+  projectContext: ProjectContext,
+  tree: TaskTree,
+  options: DecomposeSubtaskOptions = {},
+): TaskTree {
+  const target = tree.tasks.get(taskId);
+  if (!target) throw new Error(`Lattice.decomposeSubtask: task ${taskId} not found`);
+
+  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  if (target.depth >= maxDepth - 1) {
+    throw new Error(
+      `Lattice.decomposeSubtask: task ${taskId} is at depth ${target.depth}, max is ${maxDepth - 1} (MAX_TREE_DEPTH=${maxDepth}).`,
+    );
+  }
+  const maxFanout = options.maxFanout ?? DEFAULT_MAX_FANOUT;
+  const now = options.now ?? Date.now();
+  const preserveExisting = options.preserveExisting ?? true;
+
+  const prompt = (options.prompt ?? target.title).trim();
+  if (!prompt) {
+    throw new Error("Lattice.decomposeSubtask: empty prompt — cannot decompose a blank task");
+  }
+
+  const intent = parseIntent(prompt);
+  const template = INTENT_TEMPLATES[intent.kind] ?? INTENT_TEMPLATES.generic;
+  const proposed = template(intent, projectContext).slice(0, maxFanout);
+
+  // Synthesise drafts for every proposal.
+  for (const p of proposed) {
+    if (p.draftOutcome) continue;
+    p.draftOutcome = synthesizeDraft({
+      parentIntent: intent,
+      title: p.title,
+      intentTag: p.intentTag,
+      boundAssertionKeys: p.boundAssertionKeys,
+      boundDocumentIds: p.boundDocumentIds,
+      ctx: projectContext,
+      now,
+    });
+  }
+
+  // Splice the proposed list under the target. Re-use signatures to
+  // preserve user edits / status across re-decompositions.
+  const next = cloneTree(tree);
+  const existingChildIds = next.childrenOf.get(taskId) ?? [];
+  const existingBySig = new Map<string, AtomicSubtask>();
+  for (const cid of existingChildIds) {
+    const c = next.tasks.get(cid);
+    if (c) existingBySig.set(c.signature, c);
+  }
+
+  const newChildren: TaskId[] = [];
+  const proposalIndexToId = new Map<number, TaskId>();
+
+  proposed.forEach((p, idx) => {
+    const prior = existingBySig.get(p.signature);
+    if (prior && preserveExisting) {
+      const reentry: StatusHistoryEntry = {
+        status: prior.status, at: now, by: "decompose", reason: "re-decomposed (subtask)",
+      };
+      const refreshed: AtomicSubtask = {
+        ...prior,
+        title: p.title,
+        description: p.description ?? prior.description,
+        resolutionCondition: p.resolutionCondition,
+        draftOutcome: p.draftOutcome,
+        boundAssertionKeys: p.boundAssertionKeys,
+        boundDocumentIds: p.boundDocumentIds,
+        intentTag: p.intentTag,
+        updatedAt: now,
+        history: [...prior.history, reentry].slice(-20),
+      };
+      next.tasks.set(prior.id, refreshed);
+      newChildren.push(prior.id);
+      proposalIndexToId.set(idx, prior.id);
+      return;
+    }
+    const id = newId(now, idx + 1);
+    const childDepth = target.depth + 1;
+    if (childDepth > maxDepth) return; // belt-and-braces
+    const subtask: AtomicSubtask = {
+      id,
+      parentId: taskId,
+      title: p.title,
+      description: p.description,
+      status: "pending",
+      userLocked: false,
+      resolutionCondition: p.resolutionCondition,
+      draftOutcome: p.draftOutcome,
+      depth: childDepth,
+      signature: p.signature,
+      createdAt: now,
+      updatedAt: now,
+      boundAssertionKeys: p.boundAssertionKeys,
+      boundDocumentIds: p.boundDocumentIds,
+      history: [
+        { status: "pending", at: now, by: "decompose", reason: `added by sub-decomposer (depth ${childDepth})` },
+      ],
+      prerequisites: [],
+      intentTag: p.intentTag,
+    };
+    next.tasks.set(id, subtask);
+    newChildren.push(id);
+    proposalIndexToId.set(idx, id);
+  });
+
+  // Wire prerequisites by index, same as the root-level decomposer.
+  proposed.forEach((p, idx) => {
+    const id = proposalIndexToId.get(idx);
+    if (!id) return;
+    const t = next.tasks.get(id);
+    if (!t) return;
+    const prereqIds = p.prerequisites
+      .map((j) => proposalIndexToId.get(j))
+      .filter((x): x is TaskId => !!x && x !== id);
+    if (prereqIds.length > 0) {
+      next.tasks.set(id, { ...t, prerequisites: prereqIds });
+    }
+  });
+
+  // Preserve user-locked previous children that aren't in the new
+  // proposal set (same semantics as the root-level merger).
+  const newSignatures = new Set(proposed.map((p) => p.signature));
+  const userLockedSurvivors: TaskId[] = [];
+  for (const cid of existingChildIds) {
+    if (newChildren.includes(cid)) continue;
+    const c = next.tasks.get(cid);
+    if (c && c.userLocked) {
+      userLockedSurvivors.push(cid);
+    } else if (c && !newSignatures.has(c.signature)) {
+      // Drop unlocked stragglers — same behaviour as root decompose's
+      // "irrelevant" tombstone, scaled down to sub-trees.
+      const tombstone: StatusHistoryEntry = {
+        status: "irrelevant", at: now, by: "decompose", reason: "no longer required by sub-decomposition",
+      };
+      next.tasks.set(cid, {
+        ...c,
+        status: "irrelevant",
+        removedAt: now,
+        updatedAt: now,
+        history: [...c.history, tombstone].slice(-20),
+      });
+    }
+  }
+
+  next.childrenOf.set(taskId, [...newChildren, ...userLockedSurvivors]);
+
+  // Ensure every new child has an empty childrenOf entry for downstream
+  // iteration helpers.
+  for (const cid of newChildren) {
+    if (!next.childrenOf.has(cid)) next.childrenOf.set(cid, []);
+  }
+
+  // Bump target's updatedAt so the persistence layer mirrors the
+  // change. Mark target in-progress if it was previously pending —
+  // decomposing implies the user is actively working on it.
+  const targetStatus = target.status === "pending" ? "in_progress" : target.status;
+  const decomposeEntry: StatusHistoryEntry = {
+    status: targetStatus,
+    at: now,
+    by: "decompose",
+    reason: "decomposed one level deeper",
+  };
+  next.tasks.set(taskId, {
+    ...target,
+    status: targetStatus,
+    updatedAt: now,
+    history: [...target.history, decomposeEntry].slice(-20),
+  });
+
+  // Cycle safety — walk the whole tree and bail out if a back-edge
+  // appears. Defensive only; the construction above can't introduce
+  // cycles, but we still verify before returning.
+  if (hasParentCycle(next)) {
+    throw new Error("Lattice.decomposeSubtask: produced a cycle (should not happen)");
+  }
+
+  next.updatedAt = now;
+  return next;
+}
+
+/**
+ * Walk parent edges from every node and look for cycles. Returns true
+ * if a cycle exists.
+ */
+function hasParentCycle(tree: TaskTree): boolean {
+  const COLOR_VISITING = 1, COLOR_DONE = 2;
+  const color = new Map<TaskId, number>();
+  function dfs(id: TaskId, depth: number): boolean {
+    if (depth > MAX_TREE_DEPTH + 4) return true;
+    const c = color.get(id);
+    if (c === COLOR_DONE) return false;
+    if (c === COLOR_VISITING) return true;
+    color.set(id, COLOR_VISITING);
+    const task = tree.tasks.get(id);
+    if (task && task.parentId) {
+      if (dfs(task.parentId, depth + 1)) return true;
+    }
+    color.set(id, COLOR_DONE);
+    return false;
+  }
+  for (const id of tree.tasks.keys()) {
+    if (dfs(id, 0)) return true;
+  }
+  return false;
 }
 
 /* ───────────── helpers ───────────── */

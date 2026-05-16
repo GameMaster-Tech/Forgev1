@@ -40,7 +40,9 @@ import {
 import {
   buildDemoContext,
   DEMO_PARENT_TASKS,
+  MAX_TREE_DEPTH,
   createWatcher,
+  decomposeSubtask,
   parseIntent,
   reconcile,
   resolveTree,
@@ -960,7 +962,9 @@ function TaskRow({
                   )}
                 </div>
               )}
-              {/* Recursive decomposition is wired in TASK 7. */}
+              {ctx && depth < MAX_TREE_DEPTH - 1 && task.status !== "irrelevant" && (
+                <DecomposeChildButton task={task} tree={tree} ctx={ctx} onTreeChange={onTreeChange} />
+              )}
             </div>
           )}
 
@@ -1002,6 +1006,47 @@ function TaskRow({
         </div>
       </div>
     </motion.li>
+  );
+}
+
+function DecomposeChildButton({
+  task, tree, ctx, onTreeChange,
+}: {
+  task: AtomicSubtask;
+  tree: TaskTree;
+  ctx: ProjectContext;
+  onTreeChange: (t: TaskTree) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const next = decomposeSubtask(task.id, ctx, tree);
+      onTreeChange(next);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] font-semibold border border-border text-muted hover:border-violet hover:text-violet disabled:opacity-60 px-3 py-1.5 transition-colors duration-150"
+      >
+        {busy ? <Loader2 size={10} className="animate-spin" /> : <GitBranch size={10} />}
+        Decompose this subtask
+      </button>
+      {err && <span className="text-[10px] text-rose">⚠ {err}</span>}
+    </div>
   );
 }
 

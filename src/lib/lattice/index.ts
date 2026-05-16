@@ -41,8 +41,9 @@ export { evaluateCondition, decideStatus, resolveTree, cloneTree } from "./resol
 export type { ConditionVerdict, ResolverOptions, StatusDecision } from "./resolve";
 export { synthesizeDraft } from "./draft";
 export type { DraftRequest } from "./draft";
-export { decomposeTask, pruneTree, orCond } from "./decompose";
-export type { DecomposeResult } from "./decompose";
+export { decomposeTask, decomposeSubtask, pruneTree, orCond } from "./decompose";
+export type { DecomposeResult, DecomposeSubtaskOptions } from "./decompose";
+export { MAX_FANOUT, MAX_TREE_DEPTH } from "./types";
 export { createWatcher } from "./watcher";
 export type { CreateWatcherArgs } from "./watcher";
 export { buildDemoContext, DEMO_PARENT_TASKS } from "./demo";

@@ -276,10 +276,16 @@ export interface ProjectDocument {
 
 /* ───────────── decomposition ───────────── */
 
+/** Hard ceiling for recursive sub-decomposition. */
+export const MAX_TREE_DEPTH = 5;
+
+/** Per-parent fanout ceiling. */
+export const MAX_FANOUT = 12;
+
 export interface DecomposeOptions {
-  /** Max tree depth. Default 5. */
+  /** Max tree depth. Default 5 (MAX_TREE_DEPTH). */
   maxDepth?: number;
-  /** Max children per parent. Default 12. */
+  /** Max children per parent. Default 12 (MAX_FANOUT). */
   maxFanout?: number;
   /** When true, preserve existing subtasks whose signature still appears. */
   preserveExisting?: boolean;
