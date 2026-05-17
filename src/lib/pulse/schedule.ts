@@ -5,6 +5,7 @@
  */
 
 import type { Assertion, AssertionId } from "../sync/types";
+import { log } from "../observability";
 import { realityDiff } from "./diff";
 import { refactorBlocks } from "./refactor";
 import type {
@@ -38,6 +39,7 @@ export async function runSync(input: RunSyncInput): Promise<SyncRun> {
   const cfg = { ...defaultConfig("__"), ...(input.config ?? {}) } as PulseConfig;
   const projectId = cfg.projectId === "__" ? input.assertions[0]?.projectId ?? "unknown" : cfg.projectId;
   const ranAtMs = input.now ?? Date.now();
+  const startedAt = Date.now();
 
   const diffs = await realityDiff(input.assertions, input.oracle, cfg, ranAtMs);
 
@@ -53,6 +55,14 @@ export async function runSync(input: RunSyncInput): Promise<SyncRun> {
     else if (d.status === "stale") staleCount++;
     else freshCount++;
   }
+
+  log.event("pulse.sync", {
+    projectId,
+    blocksScanned: input.blocks?.length ?? 0,
+    decayed: invalidatedCount + staleCount,
+    refactors: refactorProposals.length,
+    durationMs: Date.now() - startedAt,
+  });
 
   return {
     id: `sync_${ranAtMs.toString(36)}`,

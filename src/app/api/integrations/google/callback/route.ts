@@ -17,6 +17,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyState } from "@/lib/server/crypto";
 import { exchangeAuthCode, fetchUserinfo, persistGoogleConnection, GoogleApiError } from "@/lib/server/google-api";
+import { log } from "@/lib/observability";
 
 const SCOPES = [
   "openid",
@@ -31,20 +32,26 @@ export async function GET(req: NextRequest): Promise<Response> {
   const stateToken = req.nextUrl.searchParams.get("state");
   const oauthError = req.nextUrl.searchParams.get("error");
 
+  const startedAt = Date.now();
+
   if (oauthError) {
+    log.event("oauth.exchange", { provider: "google", status: "denied", reason: oauthError });
     return NextResponse.redirect(new URL(`/calendar?integration=denied&reason=${encodeURIComponent(oauthError)}`, req.url));
   }
   if (!code || !stateToken) {
+    log.event("oauth.exchange", { provider: "google", status: "error", reason: "missing-params" });
     return NextResponse.redirect(new URL("/calendar?integration=failed&reason=missing-params", req.url));
   }
 
   const state = verifyState(stateToken);
   if (!state || !state.uid) {
+    log.event("oauth.exchange", { provider: "google", status: "error", reason: "bad-state" });
     return NextResponse.redirect(new URL("/calendar?integration=failed&reason=bad-state", req.url));
   }
 
   const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
   if (!redirectUri) {
+    log.event("oauth.exchange", { provider: "google", status: "error", reason: "server-misconfigured" });
     return NextResponse.redirect(new URL("/calendar?integration=failed&reason=server-misconfigured", req.url));
   }
 
@@ -59,10 +66,25 @@ export async function GET(req: NextRequest): Promise<Response> {
       account: { email: profile.email, displayName: profile.name ?? profile.email },
       scopes: SCOPES,
     });
+    log.event("oauth.exchange", {
+      provider: "google",
+      status: "ok",
+      userId: state.uid,
+      email: profile.email,
+      durationMs: Date.now() - startedAt,
+    });
     const returnTo = state.returnTo ?? "/calendar?integration=connected";
     return NextResponse.redirect(new URL(returnTo, req.url));
   } catch (err) {
-    const code = err instanceof GoogleApiError ? err.kind : "unknown";
-    return NextResponse.redirect(new URL(`/calendar?integration=failed&reason=${encodeURIComponent(code)}`, req.url));
+    const reason = err instanceof GoogleApiError ? err.kind : "unknown";
+    log.event("oauth.exchange", {
+      provider: "google",
+      status: "error",
+      userId: state.uid,
+      reason,
+      durationMs: Date.now() - startedAt,
+    });
+    log.error(err, { route: "oauth.callback", uid: state.uid });
+    return NextResponse.redirect(new URL(`/calendar?integration=failed&reason=${encodeURIComponent(reason)}`, req.url));
   }
 }
