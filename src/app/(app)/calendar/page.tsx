@@ -68,6 +68,8 @@ import { useCalendarStream } from "@/hooks/useCalendarStream";
 import { RealtimeIndicator } from "@/components/calendar/RealtimeIndicator";
 import { HabitsPanel } from "@/components/calendar/HabitsPanel";
 import { GoalsPanel } from "@/components/calendar/GoalsPanel";
+import { AgendaList } from "@/components/calendar/grids/AgendaList";
+import { CompilerEventsTab } from "@/components/calendar/tabs/CompilerEventsTab";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -755,41 +757,6 @@ function SyncPolicyCard() {
   );
 }
 
-/* ───────────── Compiler events tab ───────────── */
-
-function CompilerEventsTab({ events, onSelect }: { events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
-  const upcoming = events.filter((e) => new Date(e.start) >= new Date()).sort((a, b) => a.start.localeCompare(b.start));
-  return (
-    <div className="max-w-3xl mx-auto space-y-4">
-      <div>
-        <h2 className="font-display font-bold text-[22px] tracking-[-0.02em] text-foreground mb-2">Compiler events.</h2>
-        <p className="text-[13px] text-muted leading-relaxed">Sync windows, Pulse reality-sync runs, decay horizons, patch reviews, and deadline conflicts — every event Forge generates, in order.</p>
-      </div>
-      {upcoming.length === 0 ? (
-        <div className="border border-border bg-surface py-12 text-center text-muted text-[13px]">Nothing scheduled. The compiler is quiet.</div>
-      ) : (
-        <ul className="border border-border bg-surface divide-y divide-border">
-          {upcoming.map((e) => (
-            <li key={e.id}>
-              <button onClick={() => onSelect(e)} className="w-full text-left px-5 py-4 hover:bg-violet/[0.05] transition-colors flex items-start gap-3">
-                <span className={`w-1 h-12 mt-0.5 shrink-0 ${KIND_META[e.kind].bg}`} />
-                <div className="flex-1 min-w-0">
-                  <div className={`text-[10px] uppercase tracking-[0.15em] font-semibold ${KIND_META[e.kind].tone}`}>{KIND_META[e.kind].eyebrow}</div>
-                  <div className="text-[15px] font-medium text-foreground truncate mt-0.5">{e.title}</div>
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums mt-0.5">
-                    {new Date(e.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                    {!e.allDay && ` · ${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
-                  </div>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 /* ───────────── Calendar grid views (preserved) ───────────── */
 
 function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
@@ -886,47 +853,6 @@ function DayGrid({ cursor, events, onSelect }: { cursor: Date; events: CalendarE
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function AgendaList({ cursor, events, onSelect }: { cursor: Date; events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
-  const start = startOfMonth(cursor);
-  const end = endOfMonth(cursor);
-  const list = events.filter((e) => {
-    const d = new Date(e.start);
-    return d >= start && d <= end;
-  }).sort((a, b) => a.start.localeCompare(b.start));
-  const grouped = new Map<string, CalendarEvent[]>();
-  for (const e of list) {
-    const key = new Date(e.start).toDateString();
-    const arr = grouped.get(key) ?? [];
-    arr.push(e);
-    grouped.set(key, arr);
-  }
-  return (
-    <div className="border border-border bg-background">
-      {Array.from(grouped.entries()).map(([day, evs]) => (
-        <div key={day} className="border-b last:border-b-0 border-border">
-          <div className="px-4 py-2 bg-surface text-[10px] uppercase tracking-[0.18em] text-muted font-semibold flex items-center justify-between">
-            <span>{day}</span>
-            <span className="tabular-nums">{evs.length}</span>
-          </div>
-          <div className="divide-y divide-border">
-            {evs.map((e) => (
-              <button key={e.id} onClick={() => onSelect(e)} className="w-full text-left px-4 py-3 hover:bg-violet/[0.06] transition-colors flex items-start gap-3">
-                <span className={`w-1 h-10 mt-1 shrink-0 ${KIND_META[e.kind].bg}`} />
-                <div className="flex-1 min-w-0">
-                  <div className={`text-[10px] uppercase tracking-[0.15em] font-semibold ${KIND_META[e.kind].tone}`}>{KIND_META[e.kind].eyebrow}</div>
-                  <div className="font-display font-bold text-[15px] tracking-[-0.018em] text-foreground truncate mt-0.5">{e.title}</div>
-                </div>
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums shrink-0">{e.allDay ? "All day" : timeFmt(e.start)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-      {grouped.size === 0 && <div className="py-12 text-center text-muted text-[13px]">Nothing in this month.</div>}
     </div>
   );
 }
