@@ -72,7 +72,8 @@
   --foreground: #FAFAF9;
   --border: #1F1F23;
   --border-light: #18181D;
-  --muted: #52525B;
+  /* Lifted from #52525B to meet WCAG AA contrast against #09090B (≥4.5:1). */
+  --muted: #A1A1AA;
 
   /* Primary — brighter blue in dark mode */
   --violet: #3B82F6;

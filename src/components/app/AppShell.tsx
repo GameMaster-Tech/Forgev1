@@ -22,11 +22,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
+      {/* Skip-to-content — visible only when focused via keyboard. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:bg-violet focus:text-white focus:px-4 focus:py-2 focus:text-[12px] focus:font-semibold focus:uppercase focus:tracking-[0.12em]"
+      >
+        Skip to main content
+      </a>
       {/* Floating dark rail — desktop only */}
       <div className="hidden md:block shrink-0 sticky top-0 h-screen z-30 p-3">
         <Sidebar onNewProject={() => setShowNewProject(true)} />
       </div>
-      <main className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0">{children}</main>
+      <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0 focus:outline-none">
+        {children}
+      </main>
       <MobileBottomNav onNewProject={() => setShowNewProject(true)} />
       <NewProjectModal
         open={showNewProject}

@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useProjectsStore, type ResearchMode } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -114,6 +115,8 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
     onClose();
   };
 
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: open, onClose: handleClose });
+
   const handleCreate = async () => {
     if (!name.trim() || !user?.uid) return;
     setCreating(true);
@@ -164,6 +167,10 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
             className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
             <div
+              ref={trapRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="new-project-title"
               onClick={(e) => e.stopPropagation()}
               className="pointer-events-auto w-full max-w-2xl bg-surface border border-border shadow-[0_24px_56px_-20px_rgba(0,0,0,0.35)] overflow-hidden relative"
             >
@@ -176,7 +183,7 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
                     <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-1">
                       New workspace
                     </div>
-                    <h2 className="font-display text-[17px] font-semibold text-foreground leading-none tracking-[-0.01em]">
+                    <h2 id="new-project-title" className="font-display text-[17px] font-semibold text-foreground leading-none tracking-[-0.01em]">
                       Create project
                     </h2>
                   </div>
@@ -189,9 +196,9 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
                   <button
                     onClick={handleClose}
                     className="text-muted hover:text-foreground transition-colors p-1.5"
-                    aria-label="Close"
+                    aria-label="Close new-project wizard"
                   >
-                    <X size={15} strokeWidth={1.75} />
+                    <X size={15} strokeWidth={1.75} aria-hidden />
                   </button>
                 </div>
               </div>

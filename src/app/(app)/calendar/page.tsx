@@ -11,7 +11,8 @@
  * are tucked into their own tabs to keep the main view breathable.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar as CalendarIcon,
@@ -769,30 +770,92 @@ function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: Calenda
   const cells: Date[] = [];
   for (let i = 0; i < 42; i++) cells.push(addDays(gridStart, i));
   const today = new Date();
+
+  // Roving tabindex: only one cell is in the tab order at a time.
+  // Arrow keys move focus by ±1 day (left/right) or ±7 days (up/down).
+  // Enter on a cell triggers the first event of that day if any.
+  const initialFocus = cells.findIndex((d) => sameDay(d, today));
+  const [focusedIndex, setFocusedIndex] = useState<number>(initialFocus >= 0 ? initialFocus : 0);
+  const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>, i: number) => {
+    let next = i;
+    switch (e.key) {
+      case "ArrowLeft":  next = Math.max(0, i - 1); break;
+      case "ArrowRight": next = Math.min(cells.length - 1, i + 1); break;
+      case "ArrowUp":    next = Math.max(0, i - 7); break;
+      case "ArrowDown":  next = Math.min(cells.length - 1, i + 7); break;
+      case "Home":       next = i - (i % 7); break;
+      case "End":        next = i - (i % 7) + 6; break;
+      case "Enter":
+      case " ": {
+        const dayEvents = eventsOnDay(events, cells[i]);
+        if (dayEvents.length > 0) {
+          e.preventDefault();
+          onSelect(dayEvents[0]);
+        }
+        return;
+      }
+      default: return;
+    }
+    e.preventDefault();
+    setFocusedIndex(next);
+    cellRefs.current[next]?.focus();
+  };
+
   return (
     <div className="border border-border bg-background">
       {/* Desktop: 7-col grid. Hidden under 640px in favour of the stacked list below. */}
       <div className="hidden sm:block">
-        <div className="grid grid-cols-7 border-b border-border bg-surface">
+        <div className="grid grid-cols-7 border-b border-border bg-surface" role="row">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border">{d}</div>
+            <div
+              key={d}
+              role="columnheader"
+              className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border"
+            >
+              {d}
+            </div>
           ))}
         </div>
-        <div className="grid grid-cols-7">
+        <div
+          className="grid grid-cols-7"
+          role="grid"
+          aria-label={`Calendar · ${monthLabel(cursor)} · use arrow keys to move`}
+        >
           {cells.map((d, i) => {
             const dayEvents = eventsOnDay(events, d);
             const inMonth = d.getMonth() === cursor.getMonth();
             const isToday = sameDay(d, today);
+            const isFocused = focusedIndex === i;
+            const dateLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
             return (
-              <div key={i} className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative`}>
+              <div
+                key={i}
+                role="gridcell"
+                aria-selected={isFocused}
+                aria-label={`${dateLabel}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ", no events"}`}
+                tabIndex={isFocused ? 0 : -1}
+                onKeyDown={(e) => handleKey(e, i)}
+                onFocus={() => setFocusedIndex(i)}
+                ref={(el) => { cellRefs.current[i] = el as unknown as HTMLButtonElement | null; }}
+                className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative focus:outline-none focus-visible:ring-2 focus-visible:ring-violet focus-visible:ring-inset`}
+              >
                 <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
-                  <span className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
-                  {dayEvents.length > 3 && <span className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
+                  <span aria-hidden className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
+                  {dayEvents.length > 3 && <span aria-hidden className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
                 </div>
                 <div className="mt-1 space-y-0.5">
                   {dayEvents.slice(0, 3).map((e) => (
-                    <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}>
-                      <span className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
+                    <button
+                      key={e.id}
+                      type="button"
+                      tabIndex={-1}
+                      onClick={(ev) => { ev.stopPropagation(); onSelect(e); }}
+                      aria-label={`${KIND_META[e.kind].label}: ${e.title}${e.allDay ? ", all day" : `, ${timeFmt(e.start)}`}`}
+                      className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}
+                    >
+                      <span aria-hidden className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
                       {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
                     </button>
                   ))}
@@ -1025,6 +1088,7 @@ function KindLegend() {
 /* ───────────── drawers ───────────── */
 
 function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => void }) {
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: true, onClose });
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1032,6 +1096,10 @@ function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => 
       onClick={onClose}
     >
       <motion.div
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="event-drawer-title"
         initial={{ x: 32, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 32, opacity: 0 }}
         transition={{ duration: 0.25, ease }}
         onClick={(e) => e.stopPropagation()}
@@ -1039,21 +1107,21 @@ function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => 
       >
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className={`w-1.5 h-1.5 ${KIND_META[event.kind].bg}`} />
+            <span aria-hidden className={`w-1.5 h-1.5 ${KIND_META[event.kind].bg}`} />
             <span className={`text-[10px] uppercase tracking-[0.18em] font-semibold ${KIND_META[event.kind].tone}`}>{KIND_META[event.kind].eyebrow}</span>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground transition-colors" aria-label="Close"><X size={14} /></button>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground transition-colors" aria-label="Close event details"><X size={14} aria-hidden /></button>
         </div>
         <div className="px-5 py-5 space-y-4">
-          <h2 className="font-display font-bold text-[22px] tracking-[-0.022em] leading-[1.15] text-foreground">{event.title}</h2>
+          <h2 id="event-drawer-title" className="font-display font-bold text-[22px] tracking-[-0.022em] leading-[1.15] text-foreground">{event.title}</h2>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-[13px] text-muted">
-              <Clock size={12} />
+              <Clock size={12} aria-hidden />
               {new Date(event.start).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric" })}
               {!event.allDay && <> · {timeFmt(event.start)} — {timeFmt(event.end)}</>}
               {event.allDay && <> · All day</>}
             </div>
-            {event.location && <div className="flex items-center gap-2 text-[13px] text-muted"><MapPin size={12} /> {event.location}</div>}
+            {event.location && <div className="flex items-center gap-2 text-[13px] text-muted"><MapPin size={12} aria-hidden /> {event.location}</div>}
           </div>
           {event.description && <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{event.description}</p>}
           {event.locked && <p className="text-[11px] text-muted italic">System event · generated by the Compiler · read-only.</p>}
@@ -1070,6 +1138,7 @@ function NewEventModal({ cursor, onClose, onCreate }: { cursor: Date; onClose: (
   const [end, setEnd] = useState("10:00");
   const [kind, setKind] = useState<EventKind>("meeting");
   const [location, setLocation] = useState("");
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: true, onClose });
   function submit() {
     if (!title.trim()) return;
     const [sh, sm] = start.split(":").map(Number);
@@ -1087,10 +1156,10 @@ function NewEventModal({ cursor, onClose, onCreate }: { cursor: Date; onClose: (
   }
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-foreground/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <motion.div initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} transition={{ duration: 0.22, ease }} onClick={(e) => e.stopPropagation()} className="bg-background border border-border w-full max-w-md shadow-[0_30px_80px_-20px_rgba(0,0,0,0.4)]">
+      <motion.div ref={trapRef} role="dialog" aria-modal="true" aria-labelledby="new-event-title" initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} transition={{ duration: 0.22, ease }} onClick={(e) => e.stopPropagation()} className="bg-background border border-border w-full max-w-md shadow-[0_30px_80px_-20px_rgba(0,0,0,0.4)]">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">New event</span>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground" aria-label="Close"><X size={14} /></button>
+          <span id="new-event-title" className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">New event</span>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground" aria-label="Close new-event modal"><X size={14} aria-hidden /></button>
         </div>
         <div className="px-5 py-5 space-y-4">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Event title" autoFocus className="w-full font-display font-bold text-[20px] tracking-[-0.02em] bg-transparent border-b border-border focus:border-violet outline-none py-1 placeholder:text-muted" />
