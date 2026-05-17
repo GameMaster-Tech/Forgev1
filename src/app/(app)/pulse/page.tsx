@@ -155,7 +155,7 @@ export default function PulsePage() {
 
       {/* ───────── Sub-nav ───────── */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar" role="tablist" aria-label="Pulse sections">
+        <nav className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar" aria-label="Pulse sections">
           {TABS.map((t) => {
             const active = tab === t.key;
             const count =
@@ -185,7 +185,7 @@ export default function PulsePage() {
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
 
       {/* ───────── Tab content ───────── */}

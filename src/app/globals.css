@@ -9,24 +9,28 @@
   /* ── Core Palette — Light mode (deepened for bolder contrast) ── */
   --black: #070510;
   --white: #FAF9F7;
-  --cyan: #06B6D4;
-  --warm: #F97316;
+  /* Accent colours are intentionally darkened so `text-*` utilities
+     pass WCAG AA (4.5:1) against the cream background. Solid swatches
+     (`bg-*`) still read as crisp accents on light surfaces. */
+  --cyan: #155E75;
+  --warm: #9A3412;
   --surface: #FAF8F3;
   --surface-light: #EFECE4;
   --gray: #3F3F46;
   --ivory: #E6E2D9;
-  --green: #10B981;
-  --amber: #F59E0B;
-  --red: #EF4444;
-  --rose: #F43F5E;
+  --green: #065F46;
+  --amber: #B45309;
+  --red: #B91C1C;
+  --rose: #BE123C;
   --background: #E4E0D6;
   --foreground: #070510;
   --border: #B8B3A6;
   --border-light: #CFCABD;
   --muted: #57534E;
 
-  /* Primary accent — Forge Blue (deep, trustworthy) */
-  --violet: #2563EB;
+  /* Primary accent — Forge Blue. Darkened from #2563EB to pass
+     WCAG AA contrast on the cream background for `.text-violet`. */
+  --violet: #1D4ED8;
   --violet-light: #60A5FA;
 
   /* Sidebar — deep obsidian */
@@ -863,4 +867,33 @@ html {
 *:focus-visible {
   outline: 2px solid var(--violet);
   outline-offset: 2px;
+}
+
+/*
+ * Accent colour overrides for elements rendered on the dark
+ * `bg-foreground` surfaces (sidebar, dark TempoVerdict card,
+ * SyncPolicyCard, MobileBottomNav). The light-mode brand
+ * tokens are dim against the obsidian background; here we
+ * lift them to their dark-mode brightness so they still pass
+ * WCAG AA contrast.
+ */
+.bg-foreground .text-violet,
+[class*="bg-foreground"] .text-violet {
+  color: #60A5FA;
+}
+.bg-foreground .text-cyan,
+[class*="bg-foreground"] .text-cyan {
+  color: #22D3EE;
+}
+.bg-foreground .text-warm,
+[class*="bg-foreground"] .text-warm {
+  color: #FB923C;
+}
+.bg-foreground .text-rose,
+[class*="bg-foreground"] .text-rose {
+  color: #FB7185;
+}
+.bg-foreground .text-green,
+[class*="bg-foreground"] .text-green {
+  color: #34D399;
 }

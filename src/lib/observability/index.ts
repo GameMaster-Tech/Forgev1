@@ -142,7 +142,6 @@ interface LogEnvelope {
 function emit(envelope: LogEnvelope): void {
   // Local console — always on so devs can `npm run dev` and see events.
   // Sentry breadcrumb + event — silently no-op if Sentry isn't configured.
-  // eslint-disable-next-line no-console
   console.log(`[event] ${envelope.kind}`, envelope);
   captureEvent(envelope.kind, envelope);
 }
@@ -169,7 +168,6 @@ export const log = {
   error(err: unknown, context?: Record<string, unknown>): void {
     const safeCtx = context ? scrub(context) : undefined;
     captureException(err, safeCtx);
-    // eslint-disable-next-line no-console
     console.error("[error]", err, safeCtx);
   },
 

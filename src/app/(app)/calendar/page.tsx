@@ -253,9 +253,8 @@ export default function CalendarPage() {
 
       {/* Sub-nav */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div
+        <nav
           className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar"
-          role="tablist"
           aria-label="Calendar sections"
         >
           {TABS.map((t) => {
@@ -279,7 +278,7 @@ export default function CalendarPage() {
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
 
       {/* Tab content */}
@@ -807,12 +806,14 @@ function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: Calenda
     <div className="border border-border bg-background">
       {/* Desktop: 7-col grid. Hidden under 640px in favour of the stacked list below. */}
       <div className="hidden sm:block">
-        <div className="grid grid-cols-7 border-b border-border bg-surface" role="row">
+        {/* Plain weekday labels — kept outside the grid role tree so axe
+            doesn't expect the header row to be a child of role="grid". */}
+        <div className="grid grid-cols-7 border-b border-border bg-surface" role="presentation">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div
               key={d}
-              role="columnheader"
               className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border"
+              aria-hidden
             >
               {d}
             </div>
@@ -823,46 +824,54 @@ function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: Calenda
           role="grid"
           aria-label={`Calendar · ${monthLabel(cursor)} · use arrow keys to move`}
         >
-          {cells.map((d, i) => {
-            const dayEvents = eventsOnDay(events, d);
-            const inMonth = d.getMonth() === cursor.getMonth();
-            const isToday = sameDay(d, today);
-            const isFocused = focusedIndex === i;
-            const dateLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-            return (
-              <div
-                key={i}
-                role="gridcell"
-                aria-selected={isFocused}
-                aria-label={`${dateLabel}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ", no events"}`}
-                tabIndex={isFocused ? 0 : -1}
-                onKeyDown={(e) => handleKey(e, i)}
-                onFocus={() => setFocusedIndex(i)}
-                ref={(el) => { cellRefs.current[i] = el as unknown as HTMLButtonElement | null; }}
-                className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative focus:outline-none focus-visible:ring-2 focus-visible:ring-violet focus-visible:ring-inset`}
-              >
-                <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
-                  <span aria-hidden className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
-                  {dayEvents.length > 3 && <span aria-hidden className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
-                </div>
-                <div className="mt-1 space-y-0.5">
-                  {dayEvents.slice(0, 3).map((e) => (
-                    <button
-                      key={e.id}
-                      type="button"
-                      tabIndex={-1}
-                      onClick={(ev) => { ev.stopPropagation(); onSelect(e); }}
-                      aria-label={`${KIND_META[e.kind].label}: ${e.title}${e.allDay ? ", all day" : `, ${timeFmt(e.start)}`}`}
-                      className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}
-                    >
-                      <span aria-hidden className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
-                      {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {Array.from({ length: 6 }).map((_, rowIdx) => (
+            // role=row wrappers satisfy the ARIA grid pattern. `display: contents`
+            // keeps the CSS grid 7-col layout intact — the row div participates
+            // in the accessibility tree but contributes nothing to layout.
+            <div key={`row-${rowIdx}`} role="row" style={{ display: "contents" }}>
+              {cells.slice(rowIdx * 7, rowIdx * 7 + 7).map((d, colIdx) => {
+                const i = rowIdx * 7 + colIdx;
+                const dayEvents = eventsOnDay(events, d);
+                const inMonth = d.getMonth() === cursor.getMonth();
+                const isToday = sameDay(d, today);
+                const isFocused = focusedIndex === i;
+                const dateLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+                return (
+                  <div
+                    key={i}
+                    role="gridcell"
+                    aria-selected={isFocused}
+                    aria-label={`${dateLabel}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ", no events"}`}
+                    tabIndex={isFocused ? 0 : -1}
+                    onKeyDown={(e) => handleKey(e, i)}
+                    onFocus={() => setFocusedIndex(i)}
+                    ref={(el) => { cellRefs.current[i] = el as unknown as HTMLButtonElement | null; }}
+                    className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative focus:outline-none focus-visible:ring-2 focus-visible:ring-violet focus-visible:ring-inset`}
+                  >
+                    <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
+                      <span aria-hidden className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
+                      {dayEvents.length > 3 && <span aria-hidden className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
+                    </div>
+                    <div className="mt-1 space-y-0.5">
+                      {dayEvents.slice(0, 3).map((e) => (
+                        <button
+                          key={e.id}
+                          type="button"
+                          tabIndex={-1}
+                          onClick={(ev) => { ev.stopPropagation(); onSelect(e); }}
+                          aria-label={`${KIND_META[e.kind].label}: ${e.title}${e.allDay ? ", all day" : `, ${timeFmt(e.start)}`}`}
+                          className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}
+                        >
+                          <span aria-hidden className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
+                          {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 

@@ -172,7 +172,7 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
               aria-modal="true"
               aria-labelledby="new-project-title"
               onClick={(e) => e.stopPropagation()}
-              className="pointer-events-auto w-full max-w-2xl bg-surface border border-border shadow-[0_24px_56px_-20px_rgba(0,0,0,0.35)] overflow-hidden relative"
+              className="pointer-events-auto w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-surface border border-border shadow-[0_24px_56px_-20px_rgba(0,0,0,0.35)] relative"
             >
               <div className="flex items-center justify-between px-6 py-5 border-b border-border">
                 <div className="flex items-center gap-3.5">

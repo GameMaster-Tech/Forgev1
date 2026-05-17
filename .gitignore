@@ -71,6 +71,11 @@ yarn-error.log*
 *.cert
 *.crt
 
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
 # Claude Code worktree scaffolding — keep the worktree files out of
 # commits, but DO track docs and skill artifacts under .claude/ itself.
 .claude/worktrees/
