@@ -82,7 +82,7 @@ export default function SyncPage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="border-b border-border px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-5"
+        className="border-b border-border px-4 sm:px-10 pt-10 pb-6 flex flex-col gap-5"
       >
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div>
@@ -132,7 +132,7 @@ export default function SyncPage() {
       {/* Body */}
       <div className="grid grid-cols-12 gap-x-0">
         {/* Main */}
-        <div className="col-span-12 lg:col-span-8 px-6 sm:px-10 pb-16 lg:border-r lg:border-border">
+        <div className="col-span-12 lg:col-span-8 px-4 sm:px-10 pb-16 lg:border-r lg:border-border">
           {/* Patch panel */}
           <AnimatePresence>
             {patch && (
@@ -234,7 +234,7 @@ export default function SyncPage() {
         </div>
 
         {/* Rail */}
-        <aside className="col-span-12 lg:col-span-4 px-6 sm:px-10 pt-8 pb-16 space-y-6">
+        <aside className="col-span-12 lg:col-span-4 px-4 sm:px-10 pt-8 pb-16 space-y-6">
           <VerdictCard report={report} />
           <DocumentLegend docs={docs} assertions={graph.listAssertions()} />
           <PrincipleCard />

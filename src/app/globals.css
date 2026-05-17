@@ -838,3 +838,28 @@ html {
   color: var(--muted);
   font-style: italic;
 }
+
+/* ───────────── responsive utilities ───────────── */
+
+/*
+ * .no-scrollbar — hide the visual scrollbar while keeping the
+ * element scrollable. Used by the calendar sub-nav so the tab strip
+ * scrolls horizontally on mobile without a visible bar.
+ */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * Focus-visible polyfill helper. The default browser ring is fine for
+ * mouse-focusable inputs; for keyboard navigation we render a high-
+ * contrast violet ring at 2px so it passes WCAG AA on every surface.
+ */
+*:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}

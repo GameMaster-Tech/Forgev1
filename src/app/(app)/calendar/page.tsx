@@ -210,15 +210,15 @@ export default function CalendarPage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
+        className="px-4 sm:px-10 pt-8 sm:pt-10 pb-6 flex flex-col gap-6"
       >
-        <div className="flex items-end justify-between gap-6 flex-wrap">
+        <div className="flex items-end justify-between gap-4 sm:gap-6 flex-wrap">
           <div className="max-w-xl">
             <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
               <CalendarIcon size={11} strokeWidth={1.75} />
               Calendar · {monthLabel(cursor)}
             </p>
-            <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
+            <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
               The Compiler&apos;s <span className="text-violet">clock</span>.
             </h1>
             <p className="text-[13px] text-muted mt-3 leading-relaxed">
@@ -252,7 +252,11 @@ export default function CalendarPage() {
 
       {/* Sub-nav */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div className="px-6 sm:px-10 flex items-center overflow-x-auto">
+        <div
+          className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar"
+          role="tablist"
+          aria-label="Calendar sections"
+        >
           {TABS.map((t) => {
             const active = tab === t.key;
             const Icon = t.icon;
@@ -278,7 +282,7 @@ export default function CalendarPage() {
       </div>
 
       {/* Tab content */}
-      <div className="px-6 sm:px-10 pt-8 pb-16">
+      <div className="px-4 sm:px-10 pt-6 sm:pt-8 pb-16">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -767,33 +771,80 @@ function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: Calenda
   const today = new Date();
   return (
     <div className="border border-border bg-background">
-      <div className="grid grid-cols-7 border-b border-border bg-surface">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d} className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border">{d}</div>
-        ))}
+      {/* Desktop: 7-col grid. Hidden under 640px in favour of the stacked list below. */}
+      <div className="hidden sm:block">
+        <div className="grid grid-cols-7 border-b border-border bg-surface">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+            <div key={d} className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {cells.map((d, i) => {
+            const dayEvents = eventsOnDay(events, d);
+            const inMonth = d.getMonth() === cursor.getMonth();
+            const isToday = sameDay(d, today);
+            return (
+              <div key={i} className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative`}>
+                <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
+                  <span className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
+                  {dayEvents.length > 3 && <span className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
+                </div>
+                <div className="mt-1 space-y-0.5">
+                  {dayEvents.slice(0, 3).map((e) => (
+                    <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}>
+                      <span className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
+                      {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div className="grid grid-cols-7">
-        {cells.map((d, i) => {
-          const dayEvents = eventsOnDay(events, d);
-          const inMonth = d.getMonth() === cursor.getMonth();
-          const isToday = sameDay(d, today);
-          return (
-            <div key={i} className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative`}>
-              <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
-                <span className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
-                {dayEvents.length > 3 && <span className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
+
+      {/* Mobile (<640px): vertical stack — one section per in-month day that has events. */}
+      <div className="sm:hidden">
+        {cells
+          .filter((d) => d.getMonth() === cursor.getMonth())
+          .map((d) => ({ d, ev: eventsOnDay(events, d) }))
+          .filter(({ ev }) => ev.length > 0)
+          .map(({ d, ev }) => {
+            const isToday = sameDay(d, today);
+            return (
+              <div key={d.toISOString()} className="border-b last:border-b-0 border-border">
+                <div className="px-4 py-2 bg-surface flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[12px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : "text-foreground"}`}>
+                      {d.getDate()}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">
+                      {d.toLocaleString("en-US", { weekday: "long" })}
+                    </span>
+                  </div>
+                  <span className="text-[10px] tabular-nums text-muted">{ev.length}</span>
+                </div>
+                <div className="divide-y divide-border">
+                  {ev.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => onSelect(e)}
+                      className="w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-violet/[0.06] focus:bg-violet/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet"
+                    >
+                      <span aria-hidden className={`w-1 h-6 ${KIND_META[e.kind].bg} shrink-0`} />
+                      <span className={`text-[10px] uppercase tracking-[0.14em] font-semibold ${KIND_META[e.kind].tone} w-14 shrink-0 tabular-nums`}>
+                        {e.allDay ? "All day" : timeFmt(e.start)}
+                      </span>
+                      <span className="flex-1 text-[13px] text-foreground truncate">{e.title}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="mt-1 space-y-0.5">
-                {dayEvents.slice(0, 3).map((e) => (
-                  <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}>
-                    <span className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
-                    {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        {cells.filter((d) => d.getMonth() === cursor.getMonth()).every((d) => eventsOnDay(events, d).length === 0) && (
+          <div className="py-12 text-center text-muted text-[13px]">Nothing this month.</div>
+        )}
       </div>
     </div>
   );
@@ -803,26 +854,33 @@ function WeekGrid({ cursor, events, onSelect }: { cursor: Date; events: Calendar
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return (
-    <div className="border border-border bg-background">
-      <div className="grid grid-cols-7 border-b border-border bg-surface">
-        {days.map((d) => (
-          <div key={d.toISOString()} className="text-center px-2 py-2 border-r last:border-r-0 border-border">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">{d.toLocaleString("en-US", { weekday: "short" })}</div>
-            <div className="font-display font-bold text-[18px] tabular-nums">{d.getDate()}</div>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 min-h-[480px]">
-        {days.map((d) => (
-          <div key={d.toISOString()} className="border-r last:border-r-0 border-border p-2 space-y-1">
-            {eventsOnDay(events, d).map((e) => (
-              <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-1 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone} flex items-center gap-1.5`}>
-                <span className={`w-1 h-1 ${KIND_META[e.kind].bg}`} />
-                {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
-              </button>
-            ))}
-          </div>
-        ))}
+    <div className="border border-border bg-background overflow-x-auto">
+      {/* min-width preserves the 7-col layout under 640px; the parent scrolls horizontally instead of squashing each column to nothing. */}
+      <div className="min-w-[640px]">
+        <div className="grid grid-cols-7 border-b border-border bg-surface">
+          {days.map((d) => (
+            <div key={d.toISOString()} className="text-center px-2 py-2 border-r last:border-r-0 border-border">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">{d.toLocaleString("en-US", { weekday: "short" })}</div>
+              <div className="font-display font-bold text-[18px] tabular-nums">{d.getDate()}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 min-h-[480px]">
+          {days.map((d) => (
+            <div key={d.toISOString()} className="border-r last:border-r-0 border-border p-2 space-y-1">
+              {eventsOnDay(events, d).map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => onSelect(e)}
+                  className={`w-full text-left text-[11px] truncate px-1.5 py-1 hover:bg-foreground hover:text-background focus:outline-none focus-visible:ring-2 focus-visible:ring-violet transition-colors duration-100 ${KIND_META[e.kind].tone} flex items-center gap-1.5`}
+                >
+                  <span aria-hidden className={`w-1 h-1 ${KIND_META[e.kind].bg}`} />
+                  {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

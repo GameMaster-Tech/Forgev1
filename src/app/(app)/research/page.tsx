@@ -22,7 +22,7 @@ export default function ResearchPage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="border-b border-border px-6 sm:px-10 pt-10 pb-6"
+        className="border-b border-border px-4 sm:px-10 pt-8 sm:pt-10 pb-6"
       >
         <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">
           Research
