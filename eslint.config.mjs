@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // E2E suite uses its own tsconfig + Playwright types.
+    "e2e/**",
+    "playwright.config.ts",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

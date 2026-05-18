@@ -19,6 +19,7 @@
 
 import { DependencyGraph } from "./graph";
 import { detectViolations } from "./detect";
+import { log } from "../observability";
 import { lookup, marketRef, type MarketQuote } from "./market";
 import type {
   Assertion,
@@ -73,6 +74,7 @@ export function proposePatch(
   options: SolverOptions = {},
 ): LogicalPatch {
   const opts = { ...DEFAULTS, ...options };
+  const startedAt = Date.now();
   const work = cloneGraph(source);
 
   const resolved: Violation[] = [];
@@ -113,6 +115,13 @@ export function proposePatch(
   const reachesStableState = after.every((v) => v.severity !== "hard");
 
   const changes = Array.from(changesById.values());
+  log.event("sync.compile", {
+    projectId: source.projectId,
+    assertions: source.listAssertions().length,
+    violations: after.length,
+    patches: changes.length,
+    durationMs: Date.now() - startedAt,
+  });
   return {
     id: `patch_${(opts.now ?? Date.now()).toString(36)}`,
     projectId: source.projectId,

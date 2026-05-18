@@ -249,7 +249,7 @@ export default function PulsePage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
+        className="px-4 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
       >
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div className="max-w-2xl">
@@ -294,7 +294,7 @@ export default function PulsePage() {
 
       {/* ───────── Sub-nav ───────── */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div className="px-6 sm:px-10 flex items-center">
+        <nav className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar" aria-label="Pulse sections">
           {TABS.map((t) => {
             const active = tab === t.key;
             const count =
@@ -324,11 +324,11 @@ export default function PulsePage() {
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
 
       {/* ───────── Tab content ───────── */}
-      <div className="px-6 sm:px-10 pt-8 pb-16">
+      <div className="px-4 sm:px-10 pt-8 pb-16">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}

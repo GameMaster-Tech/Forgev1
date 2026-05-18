@@ -22,6 +22,7 @@ import { ensureFreshAccessToken, makeServerHttpClient, type IntegrationDoc, Goog
 import { getAdminFirestore } from "@/lib/firebase/admin";
 import { bidirectionalDiff, googleToTimed, resolveSyncConflict, timedToGoogle, type ConflictPolicy, type SyncSnapshotEntry, type TimedEvent } from "@/lib/scheduler";
 import { publishCalendarEvent } from "@/lib/server/realtime";
+import { log } from "@/lib/observability";
 import { FieldValue } from "firebase-admin/firestore";
 
 const DEFAULT_RANGE_DAYS = 60;
@@ -48,6 +49,17 @@ export async function POST(req: NextRequest): Promise<Response> {
       rangeEnd,
       policy,
     });
+    log.event("gcal.sync", {
+      userId: user.uid,
+      direction: "bidirectional",
+      applied:
+        stats.toCreateRemote + stats.toUpdateRemote + stats.toDeleteRemote +
+        stats.toCreateLocal + stats.toUpdateLocal + stats.toDeleteLocal,
+      conflicts: stats.conflictsResolved,
+      errors: 0,
+      durationMs: stats.durationMs,
+      trigger: "manual",
+    });
     return NextResponse.json({ ok: true, ...stats });
   } catch (err) {
     const status =
@@ -55,6 +67,13 @@ export async function POST(req: NextRequest): Promise<Response> {
       err instanceof GoogleApiError && err.kind === "revoked"          ? 410 :
       err instanceof GoogleApiError && err.kind === "rate-limited"     ? 429 : 500;
     const message = err instanceof Error ? err.message : "sync failed";
+    log.event("gcal.sync", {
+      userId: user.uid,
+      direction: "bidirectional",
+      errors: 1,
+      trigger: "manual",
+    });
+    log.error(err, { route: "gcal.sync", uid: user.uid });
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 }

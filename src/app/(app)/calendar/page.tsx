@@ -11,7 +11,8 @@
  * are tucked into their own tabs to keep the main view breathable.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar as CalendarIcon,
@@ -69,6 +70,8 @@ import { useRegisterCommandSource, makeCommandId, type CommandItem } from "@/hoo
 import { RealtimeIndicator } from "@/components/calendar/RealtimeIndicator";
 import { HabitsPanel } from "@/components/calendar/HabitsPanel";
 import { GoalsPanel } from "@/components/calendar/GoalsPanel";
+import { AgendaList } from "@/components/calendar/grids/AgendaList";
+import { CompilerEventsTab } from "@/components/calendar/tabs/CompilerEventsTab";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -224,15 +227,15 @@ export default function CalendarPage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
+        className="px-4 sm:px-10 pt-8 sm:pt-10 pb-6 flex flex-col gap-6"
       >
-        <div className="flex items-end justify-between gap-6 flex-wrap">
+        <div className="flex items-end justify-between gap-4 sm:gap-6 flex-wrap">
           <div className="max-w-xl">
             <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
               <CalendarIcon size={11} strokeWidth={1.75} />
               Calendar · {monthLabel(cursor)}
             </p>
-            <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
+            <h1 className="font-display font-extrabold text-2xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
               The Compiler&apos;s <span className="text-violet">clock</span>.
             </h1>
             <p className="text-[13px] text-muted mt-3 leading-relaxed">
@@ -266,7 +269,10 @@ export default function CalendarPage() {
 
       {/* Sub-nav */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div className="px-6 sm:px-10 flex items-center overflow-x-auto">
+        <nav
+          className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar"
+          aria-label="Calendar sections"
+        >
           {TABS.map((t) => {
             const active = tab === t.key;
             const Icon = t.icon;
@@ -288,11 +294,11 @@ export default function CalendarPage() {
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
 
       {/* Tab content */}
-      <div className="px-6 sm:px-10 pt-8 pb-16">
+      <div className="px-4 sm:px-10 pt-6 sm:pt-8 pb-16">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -771,41 +777,6 @@ function SyncPolicyCard() {
   );
 }
 
-/* ───────────── Compiler events tab ───────────── */
-
-function CompilerEventsTab({ events, onSelect }: { events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
-  const upcoming = events.filter((e) => new Date(e.start) >= new Date()).sort((a, b) => a.start.localeCompare(b.start));
-  return (
-    <div className="max-w-3xl mx-auto space-y-4">
-      <div>
-        <h2 className="font-display font-bold text-[22px] tracking-[-0.02em] text-foreground mb-2">Compiler events.</h2>
-        <p className="text-[13px] text-muted leading-relaxed">Sync windows, Pulse reality-sync runs, decay horizons, patch reviews, and deadline conflicts — every event Forge generates, in order.</p>
-      </div>
-      {upcoming.length === 0 ? (
-        <div className="border border-border bg-surface py-12 text-center text-muted text-[13px]">Nothing scheduled. The compiler is quiet.</div>
-      ) : (
-        <ul className="border border-border bg-surface divide-y divide-border">
-          {upcoming.map((e) => (
-            <li key={e.id}>
-              <button onClick={() => onSelect(e)} className="w-full text-left px-5 py-4 hover:bg-violet/[0.05] transition-colors flex items-start gap-3">
-                <span className={`w-1 h-12 mt-0.5 shrink-0 ${KIND_META[e.kind].bg}`} />
-                <div className="flex-1 min-w-0">
-                  <div className={`text-[10px] uppercase tracking-[0.15em] font-semibold ${KIND_META[e.kind].tone}`}>{KIND_META[e.kind].eyebrow}</div>
-                  <div className="text-[15px] font-medium text-foreground truncate mt-0.5">{e.title}</div>
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums mt-0.5">
-                    {new Date(e.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                    {!e.allDay && ` · ${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
-                  </div>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 /* ───────────── Calendar grid views (preserved) ───────────── */
 
 function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
@@ -814,35 +785,154 @@ function MonthGrid({ cursor, events, onSelect }: { cursor: Date; events: Calenda
   const cells: Date[] = [];
   for (let i = 0; i < 42; i++) cells.push(addDays(gridStart, i));
   const today = new Date();
+
+  // Roving tabindex: only one cell is in the tab order at a time.
+  // Arrow keys move focus by ±1 day (left/right) or ±7 days (up/down).
+  // Enter on a cell triggers the first event of that day if any.
+  const initialFocus = cells.findIndex((d) => sameDay(d, today));
+  const [focusedIndex, setFocusedIndex] = useState<number>(initialFocus >= 0 ? initialFocus : 0);
+  const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>, i: number) => {
+    let next = i;
+    switch (e.key) {
+      case "ArrowLeft":  next = Math.max(0, i - 1); break;
+      case "ArrowRight": next = Math.min(cells.length - 1, i + 1); break;
+      case "ArrowUp":    next = Math.max(0, i - 7); break;
+      case "ArrowDown":  next = Math.min(cells.length - 1, i + 7); break;
+      case "Home":       next = i - (i % 7); break;
+      case "End":        next = i - (i % 7) + 6; break;
+      case "Enter":
+      case " ": {
+        const dayEvents = eventsOnDay(events, cells[i]);
+        if (dayEvents.length > 0) {
+          e.preventDefault();
+          onSelect(dayEvents[0]);
+        }
+        return;
+      }
+      default: return;
+    }
+    e.preventDefault();
+    setFocusedIndex(next);
+    cellRefs.current[next]?.focus();
+  };
+
   return (
     <div className="border border-border bg-background">
-      <div className="grid grid-cols-7 border-b border-border bg-surface">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d} className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border">{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7">
-        {cells.map((d, i) => {
-          const dayEvents = eventsOnDay(events, d);
-          const inMonth = d.getMonth() === cursor.getMonth();
-          const isToday = sameDay(d, today);
-          return (
-            <div key={i} className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative`}>
-              <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
-                <span className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
-                {dayEvents.length > 3 && <span className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
-              </div>
-              <div className="mt-1 space-y-0.5">
-                {dayEvents.slice(0, 3).map((e) => (
-                  <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}>
-                    <span className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
-                    {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
-                  </button>
-                ))}
-              </div>
+      {/* Desktop: 7-col grid. Hidden under 640px in favour of the stacked list below. */}
+      <div className="hidden sm:block">
+        {/* Plain weekday labels — kept outside the grid role tree so axe
+            doesn't expect the header row to be a child of role="grid". */}
+        <div className="grid grid-cols-7 border-b border-border bg-surface" role="presentation">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+            <div
+              key={d}
+              className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold px-3 py-2 text-center border-r last:border-r-0 border-border"
+              aria-hidden
+            >
+              {d}
             </div>
-          );
-        })}
+          ))}
+        </div>
+        <div
+          className="grid grid-cols-7"
+          role="grid"
+          aria-label={`Calendar · ${monthLabel(cursor)} · use arrow keys to move`}
+        >
+          {Array.from({ length: 6 }).map((_, rowIdx) => (
+            // role=row wrappers satisfy the ARIA grid pattern. `display: contents`
+            // keeps the CSS grid 7-col layout intact — the row div participates
+            // in the accessibility tree but contributes nothing to layout.
+            <div key={`row-${rowIdx}`} role="row" style={{ display: "contents" }}>
+              {cells.slice(rowIdx * 7, rowIdx * 7 + 7).map((d, colIdx) => {
+                const i = rowIdx * 7 + colIdx;
+                const dayEvents = eventsOnDay(events, d);
+                const inMonth = d.getMonth() === cursor.getMonth();
+                const isToday = sameDay(d, today);
+                const isFocused = focusedIndex === i;
+                const dateLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+                return (
+                  <div
+                    key={i}
+                    role="gridcell"
+                    aria-selected={isFocused}
+                    aria-label={`${dateLabel}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ", no events"}`}
+                    tabIndex={isFocused ? 0 : -1}
+                    onKeyDown={(e) => handleKey(e, i)}
+                    onFocus={() => setFocusedIndex(i)}
+                    ref={(el) => { cellRefs.current[i] = el as unknown as HTMLButtonElement | null; }}
+                    className={`min-h-[105px] border-r border-b last:border-r-0 border-border p-1.5 ${inMonth ? "bg-background" : "bg-surface/60"} relative focus:outline-none focus-visible:ring-2 focus-visible:ring-violet focus-visible:ring-inset`}
+                  >
+                    <div className={`flex items-center gap-1 ${inMonth ? "text-foreground" : "text-muted"}`}>
+                      <span aria-hidden className={`text-[11px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : ""}`}>{d.getDate()}</span>
+                      {dayEvents.length > 3 && <span aria-hidden className="text-[9px] uppercase tracking-[0.12em] text-muted ml-auto">+{dayEvents.length - 3}</span>}
+                    </div>
+                    <div className="mt-1 space-y-0.5">
+                      {dayEvents.slice(0, 3).map((e) => (
+                        <button
+                          key={e.id}
+                          type="button"
+                          tabIndex={-1}
+                          onClick={(ev) => { ev.stopPropagation(); onSelect(e); }}
+                          aria-label={`${KIND_META[e.kind].label}: ${e.title}${e.allDay ? ", all day" : `, ${timeFmt(e.start)}`}`}
+                          className={`w-full text-left text-[11px] truncate px-1.5 py-0.5 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone}`}
+                        >
+                          <span aria-hidden className={`inline-block w-1 h-1 mr-1.5 align-middle ${KIND_META[e.kind].bg}`} />
+                          {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Mobile (<640px): vertical stack — one section per in-month day that has events. */}
+      <div className="sm:hidden">
+        {cells
+          .filter((d) => d.getMonth() === cursor.getMonth())
+          .map((d) => ({ d, ev: eventsOnDay(events, d) }))
+          .filter(({ ev }) => ev.length > 0)
+          .map(({ d, ev }) => {
+            const isToday = sameDay(d, today);
+            return (
+              <div key={d.toISOString()} className="border-b last:border-b-0 border-border">
+                <div className="px-4 py-2 bg-surface flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[12px] font-display font-bold tabular-nums tracking-tight ${isToday ? "bg-violet text-white px-1.5 py-0.5" : "text-foreground"}`}>
+                      {d.getDate()}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">
+                      {d.toLocaleString("en-US", { weekday: "long" })}
+                    </span>
+                  </div>
+                  <span className="text-[10px] tabular-nums text-muted">{ev.length}</span>
+                </div>
+                <div className="divide-y divide-border">
+                  {ev.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => onSelect(e)}
+                      className="w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-violet/[0.06] focus:bg-violet/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet"
+                    >
+                      <span aria-hidden className={`w-1 h-6 ${KIND_META[e.kind].bg} shrink-0`} />
+                      <span className={`text-[10px] uppercase tracking-[0.14em] font-semibold ${KIND_META[e.kind].tone} w-14 shrink-0 tabular-nums`}>
+                        {e.allDay ? "All day" : timeFmt(e.start)}
+                      </span>
+                      <span className="flex-1 text-[13px] text-foreground truncate">{e.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        {cells.filter((d) => d.getMonth() === cursor.getMonth()).every((d) => eventsOnDay(events, d).length === 0) && (
+          <div className="py-12 text-center text-muted text-[13px]">Nothing this month.</div>
+        )}
       </div>
     </div>
   );
@@ -852,26 +942,33 @@ function WeekGrid({ cursor, events, onSelect }: { cursor: Date; events: Calendar
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return (
-    <div className="border border-border bg-background">
-      <div className="grid grid-cols-7 border-b border-border bg-surface">
-        {days.map((d) => (
-          <div key={d.toISOString()} className="text-center px-2 py-2 border-r last:border-r-0 border-border">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">{d.toLocaleString("en-US", { weekday: "short" })}</div>
-            <div className="font-display font-bold text-[18px] tabular-nums">{d.getDate()}</div>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 min-h-[480px]">
-        {days.map((d) => (
-          <div key={d.toISOString()} className="border-r last:border-r-0 border-border p-2 space-y-1">
-            {eventsOnDay(events, d).map((e) => (
-              <button key={e.id} onClick={() => onSelect(e)} className={`w-full text-left text-[11px] truncate px-1.5 py-1 hover:bg-foreground hover:text-background transition-colors duration-100 ${KIND_META[e.kind].tone} flex items-center gap-1.5`}>
-                <span className={`w-1 h-1 ${KIND_META[e.kind].bg}`} />
-                {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
-              </button>
-            ))}
-          </div>
-        ))}
+    <div className="border border-border bg-background overflow-x-auto">
+      {/* min-width preserves the 7-col layout under 640px; the parent scrolls horizontally instead of squashing each column to nothing. */}
+      <div className="min-w-[640px]">
+        <div className="grid grid-cols-7 border-b border-border bg-surface">
+          {days.map((d) => (
+            <div key={d.toISOString()} className="text-center px-2 py-2 border-r last:border-r-0 border-border">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">{d.toLocaleString("en-US", { weekday: "short" })}</div>
+              <div className="font-display font-bold text-[18px] tabular-nums">{d.getDate()}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 min-h-[480px]">
+          {days.map((d) => (
+            <div key={d.toISOString()} className="border-r last:border-r-0 border-border p-2 space-y-1">
+              {eventsOnDay(events, d).map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => onSelect(e)}
+                  className={`w-full text-left text-[11px] truncate px-1.5 py-1 hover:bg-foreground hover:text-background focus:outline-none focus-visible:ring-2 focus-visible:ring-violet transition-colors duration-100 ${KIND_META[e.kind].tone} flex items-center gap-1.5`}
+                >
+                  <span aria-hidden className={`w-1 h-1 ${KIND_META[e.kind].bg}`} />
+                  {e.allDay ? e.title : `${timeFmt(e.start)} ${e.title}`}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -902,47 +999,6 @@ function DayGrid({ cursor, events, onSelect }: { cursor: Date; events: CalendarE
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function AgendaList({ cursor, events, onSelect }: { cursor: Date; events: CalendarEvent[]; onSelect: (e: CalendarEvent) => void }) {
-  const start = startOfMonth(cursor);
-  const end = endOfMonth(cursor);
-  const list = events.filter((e) => {
-    const d = new Date(e.start);
-    return d >= start && d <= end;
-  }).sort((a, b) => a.start.localeCompare(b.start));
-  const grouped = new Map<string, CalendarEvent[]>();
-  for (const e of list) {
-    const key = new Date(e.start).toDateString();
-    const arr = grouped.get(key) ?? [];
-    arr.push(e);
-    grouped.set(key, arr);
-  }
-  return (
-    <div className="border border-border bg-background">
-      {Array.from(grouped.entries()).map(([day, evs]) => (
-        <div key={day} className="border-b last:border-b-0 border-border">
-          <div className="px-4 py-2 bg-surface text-[10px] uppercase tracking-[0.18em] text-muted font-semibold flex items-center justify-between">
-            <span>{day}</span>
-            <span className="tabular-nums">{evs.length}</span>
-          </div>
-          <div className="divide-y divide-border">
-            {evs.map((e) => (
-              <button key={e.id} onClick={() => onSelect(e)} className="w-full text-left px-4 py-3 hover:bg-violet/[0.06] transition-colors flex items-start gap-3">
-                <span className={`w-1 h-10 mt-1 shrink-0 ${KIND_META[e.kind].bg}`} />
-                <div className="flex-1 min-w-0">
-                  <div className={`text-[10px] uppercase tracking-[0.15em] font-semibold ${KIND_META[e.kind].tone}`}>{KIND_META[e.kind].eyebrow}</div>
-                  <div className="font-display font-bold text-[15px] tracking-[-0.018em] text-foreground truncate mt-0.5">{e.title}</div>
-                </div>
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums shrink-0">{e.allDay ? "All day" : timeFmt(e.start)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-      {grouped.size === 0 && <div className="py-12 text-center text-muted text-[13px]">Nothing in this month.</div>}
     </div>
   );
 }
@@ -1057,6 +1113,7 @@ function KindLegend() {
 /* ───────────── drawers ───────────── */
 
 function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => void }) {
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: true, onClose });
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1064,6 +1121,10 @@ function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => 
       onClick={onClose}
     >
       <motion.div
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="event-drawer-title"
         initial={{ x: 32, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 32, opacity: 0 }}
         transition={{ duration: 0.25, ease }}
         onClick={(e) => e.stopPropagation()}
@@ -1071,21 +1132,21 @@ function EventDrawer({ event, onClose }: { event: CalendarEvent; onClose: () => 
       >
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className={`w-1.5 h-1.5 ${KIND_META[event.kind].bg}`} />
+            <span aria-hidden className={`w-1.5 h-1.5 ${KIND_META[event.kind].bg}`} />
             <span className={`text-[10px] uppercase tracking-[0.18em] font-semibold ${KIND_META[event.kind].tone}`}>{KIND_META[event.kind].eyebrow}</span>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground transition-colors" aria-label="Close"><X size={14} /></button>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground transition-colors" aria-label="Close event details"><X size={14} aria-hidden /></button>
         </div>
         <div className="px-5 py-5 space-y-4">
-          <h2 className="font-display font-bold text-[22px] tracking-[-0.022em] leading-[1.15] text-foreground">{event.title}</h2>
+          <h2 id="event-drawer-title" className="font-display font-bold text-[22px] tracking-[-0.022em] leading-[1.15] text-foreground">{event.title}</h2>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-[13px] text-muted">
-              <Clock size={12} />
+              <Clock size={12} aria-hidden />
               {new Date(event.start).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric" })}
               {!event.allDay && <> · {timeFmt(event.start)} — {timeFmt(event.end)}</>}
               {event.allDay && <> · All day</>}
             </div>
-            {event.location && <div className="flex items-center gap-2 text-[13px] text-muted"><MapPin size={12} /> {event.location}</div>}
+            {event.location && <div className="flex items-center gap-2 text-[13px] text-muted"><MapPin size={12} aria-hidden /> {event.location}</div>}
           </div>
           {event.description && <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{event.description}</p>}
           {event.locked && <p className="text-[11px] text-muted italic">System event · generated by the Compiler · read-only.</p>}
@@ -1102,6 +1163,7 @@ function NewEventModal({ cursor, onClose, onCreate }: { cursor: Date; onClose: (
   const [end, setEnd] = useState("10:00");
   const [kind, setKind] = useState<EventKind>("meeting");
   const [location, setLocation] = useState("");
+  const trapRef = useFocusTrap<HTMLDivElement>({ active: true, onClose });
   function submit() {
     if (!title.trim()) return;
     const [sh, sm] = start.split(":").map(Number);
@@ -1119,10 +1181,10 @@ function NewEventModal({ cursor, onClose, onCreate }: { cursor: Date; onClose: (
   }
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-foreground/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <motion.div initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} transition={{ duration: 0.22, ease }} onClick={(e) => e.stopPropagation()} className="bg-background border border-border w-full max-w-md shadow-[0_30px_80px_-20px_rgba(0,0,0,0.4)]">
+      <motion.div ref={trapRef} role="dialog" aria-modal="true" aria-labelledby="new-event-title" initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} transition={{ duration: 0.22, ease }} onClick={(e) => e.stopPropagation()} className="bg-background border border-border w-full max-w-md shadow-[0_30px_80px_-20px_rgba(0,0,0,0.4)]">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">New event</span>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground" aria-label="Close"><X size={14} /></button>
+          <span id="new-event-title" className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold">New event</span>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-foreground" aria-label="Close new-event modal"><X size={14} aria-hidden /></button>
         </div>
         <div className="px-5 py-5 space-y-4">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Event title" autoFocus className="w-full font-display font-bold text-[20px] tracking-[-0.02em] bg-transparent border-b border-border focus:border-violet outline-none py-1 placeholder:text-muted" />

@@ -328,7 +328,7 @@ export default function LatticePage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="px-6 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
+        className="px-4 sm:px-10 pt-10 pb-6 flex flex-col gap-6"
       >
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div className="max-w-2xl">
@@ -419,9 +419,9 @@ export default function LatticePage() {
         </div>
       </motion.header>
 
-      {/* ───────── Sub-nav ───────── */}
+      {/* ───────── Sub-nav (TASK 5: editorial tabs replace the old 8/4 grid) ───────── */}
       <div className="border-y border-border bg-background sticky top-0 z-10">
-        <div className="px-6 sm:px-10 flex items-center">
+        <div className="px-4 sm:px-10 flex items-center overflow-x-auto no-scrollbar">
           {TABS.map((t) => {
             const active = tab === t.key;
             const Icon = t.icon;
@@ -436,7 +436,7 @@ export default function LatticePage() {
                 className={`relative text-[11px] uppercase tracking-[0.14em] font-semibold px-4 py-3 transition-colors duration-150 ${active ? "text-foreground" : "text-muted hover:text-foreground"}`}
                 aria-current={active ? "page" : undefined}
               >
-                <span className="inline-flex items-center gap-2">
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
                   <Icon size={11} strokeWidth={1.75} />
                   {t.label}
                   {badge !== null && (
@@ -459,7 +459,7 @@ export default function LatticePage() {
       </div>
 
       {/* ───────── Tab content ───────── */}
-      <div className="px-6 sm:px-10 pt-8 pb-16">
+      <div className="px-4 sm:px-10 pt-8 pb-16">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
