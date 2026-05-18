@@ -24,6 +24,8 @@ import {
   Activity,
   Calendar,
   History,
+  Network,
+  Clock,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { motion } from "framer-motion";
@@ -36,8 +38,10 @@ const navItems: { href: string; icon: typeof Search; label: string }[] = [
   { href: "/projects", icon: FolderOpen, label: "Projects" },
   { href: "/sync", icon: GitBranch, label: "Sync" },
   { href: "/pulse", icon: Activity, label: "Pulse" },
+  { href: "/lattice", icon: Network, label: "Lattice" },
   { href: "/calendar", icon: Calendar, label: "Calendar" },
   { href: "/activity", icon: History, label: "Activity" },
+  { href: "/history", icon: Clock, label: "History" },
   { href: "/teams", icon: Users, label: "Teams" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];

@@ -5,6 +5,7 @@ import Sidebar from "@/components/app/Sidebar";
 import MobileBottomNav from "@/components/app/MobileBottomNav";
 import NewProjectModal from "@/components/app/NewProjectModal";
 import { CommandPalette } from "@/components/palette/CommandPalette";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 /**
  * AppShell — floating dark sidebar on desktop, bottom bar on mobile.
@@ -37,6 +38,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0 focus:outline-none">
         {children}
       </main>
+      {/* Notification bell — floating top-right on desktop. */}
+      <div className="hidden md:block fixed top-4 right-4 z-40">
+        <NotificationBell />
+      </div>
       <MobileBottomNav onNewProject={() => setShowNewProject(true)} />
       <NewProjectModal
         open={showNewProject}
