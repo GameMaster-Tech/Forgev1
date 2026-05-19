@@ -7,19 +7,91 @@ service cloud.firestore {
     // Core app collections
     // ────────────────────────────────────────────────────────────
 
-    // Users — owner can read/write their own profile
+    // ────────────────────────────────────────────────────────────
+    // Users — owner can read/write their own profile + every
+    // user-scoped subtree. Each feature gets an explicit match block
+    // so future per-feature carve-outs (e.g. sharing) drop into the
+    // right scope.
+    // ────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read, write: if request.auth != null
                          && request.auth.uid == userId;
 
-      // Nested project subtree — covers Yjs collab state (NEW 17)
-      // and per-project IO writes (NEW 23). Recursive wildcard so we
-      // don't have to enumerate /assertions, /documents, /yjs/{guid}/
-      // updates, /yjs/{guid}/_snapshot, /blocks, /constraints, etc.
+      // Project subtree — Sync (assertions/constraints), Pulse
+      // (blocks/refactors/rejections), Lattice (plan/subtasks),
+      // Collab (yjs/{guid}/updates + _snapshot), project-level
+      // sharing grants, IO history. Recursive so we don't enumerate.
       match /projects/{projectId}/{document=**} {
         allow read, write: if request.auth != null
                            && request.auth.uid == userId;
       }
+
+      // Calendar subtree — Tempo events/tasks/habits/goals, focus
+      // blocks, goal blocks, routine, completions, calendar-level
+      // sharing grants.
+      match /calendar/{document=**} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+
+      // Integrations subtree — Google Calendar (refresh tokens
+      // encrypted at rest; access tokens short-lived). Server-only
+      // writes via the admin SDK; clients can read for status surfacing.
+      match /integrations/{document=**} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      // Notifications — bell panel + preferences singleton.
+      match /notifications/{document=**} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+
+      // Realtime SSE events — client reads its own stream; only the
+      // admin SDK writes (publishCalendarEvent). The TTL policy on
+      // `ttlExpiresAt` keeps the collection bounded.
+      match /realtime/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      // Activity feed — server-written, owner-read.
+      match /activity/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      // Versions / time-travel log — append-only via the aggregator
+      // (server-side). Owner reads.
+      match /versions/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      // Templates audit — which template seeded which project.
+      match /templates/{document=**} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Public-read collections — token-protected or read-only.
+    // ────────────────────────────────────────────────────────────
+
+    // Public-link share — anyone with the unguessable token reads;
+    // writes only via the admin SDK (mintPublicLink server side).
+    match /publicLinks/{token} {
+      allow read:  if true;
+      allow write: if false;
+    }
+
+    // Canonical templates (Founder / Researcher / Consultant /
+    // Policy / Legal). Read-only for all signed-in users.
+    match /templates/{key} {
+      allow read:  if request.auth != null;
+      allow write: if false;
     }
 
     // Projects — only the owner can CRUD

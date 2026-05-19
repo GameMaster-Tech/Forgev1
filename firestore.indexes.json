@@ -1,6 +1,7 @@
 {
   "indexes": [
     {
+      "_comment": "Projects — owner's project list (most-recent first).",
       "collectionGroup": "projects",
       "queryScope": "COLLECTION",
       "fields": [
@@ -8,14 +9,9 @@
         { "fieldPath": "updatedAt", "order": "DESCENDING" }
       ]
     },
+
     {
-      "collectionGroup": "updates",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "at", "order": "ASCENDING" }
-      ]
-    },
-    {
+      "_comment": "Documents — list per project.",
       "collectionGroup": "documents",
       "queryScope": "COLLECTION",
       "fields": [
@@ -24,6 +20,7 @@
       ]
     },
     {
+      "_comment": "Documents — owner's docs across all projects.",
       "collectionGroup": "documents",
       "queryScope": "COLLECTION",
       "fields": [
@@ -33,14 +30,192 @@
       ]
     },
 
-    // ─────────────────────────────────────────────────────────────
-    // Veritas — claims
-    // listClaims(): projectId + retired? + updatedAt DESC
-    // listByTopic(): projectId + topicId + retired
-    // listByEntity(): projectId + entities(array-contains) + retired
-    // getByHash(): projectId + canonicalHash
-    // ─────────────────────────────────────────────────────────────
     {
+      "_comment": "Sync — Assertion latest-value resolver.",
+      "collectionGroup": "assertions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "key", "order": "ASCENDING" },
+        { "fieldPath": "sourcedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "Sync — Constraints detector ordering (severity DESC effectively via ordering).",
+      "collectionGroup": "constraints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "severity", "order": "ASCENDING" },
+        { "fieldPath": "kind", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Lattice — children of a parent task.",
+      "collectionGroup": "subtasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Lattice — dedup by signature across rebranches.",
+      "collectionGroup": "subtasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "signature", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Tempo / Calendar — events sorted for the grid + status filter.",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "start", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Tempo — GCal remote→local lookup.",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "externalId", "order": "ASCENDING" },
+        { "fieldPath": "externalSource", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Tempo — task priority queue ordered by due date.",
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "due", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Tempo — tasks bound to a goal (goal-gravity calculation).",
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "boundGoalId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Habits — habit completions ordered newest-first for streak walk.",
+      "collectionGroup": "completions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Notifications — unread bell badge query.",
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "read", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Realtime SSE — TTL field for auto-delete (configure TTL policy).",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ttlExpiresAt", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Activity feed — filter by source + chronological.",
+      "collectionGroup": "activity",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "Activity feed — chronological scroll (no filter).",
+      "collectionGroup": "activity",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Versions — filter by source + chronological.",
+      "collectionGroup": "versions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "Versions — chronological scrubber.",
+      "collectionGroup": "versions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Sharing — list grants on a resource.",
+      "collectionGroup": "shares",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "resource.kind", "order": "ASCENDING" },
+        { "fieldPath": "resource.id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Sharing — what does principal X have access to?",
+      "collectionGroup": "shares",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "principal.id", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Collab — Yjs update replay order.",
+      "collectionGroup": "updates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Collab — Yjs update prune by age (compact() job).",
+      "collectionGroup": "updates",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "at", "order": "ASCENDING" },
+        { "fieldPath": "peerId", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Pulse — refactor rejection cooldown lookup.",
+      "collectionGroup": "rejections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "blockId", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+
+    {
+      "_comment": "Veritas — claim listing (Phase 1).",
       "collectionGroup": "veritasClaims",
       "queryScope": "COLLECTION",
       "fields": [
@@ -83,11 +258,8 @@
         { "fieldPath": "entities", "arrayConfig": "CONTAINS" }
       ]
     },
-    // Retire-cascade lookup: find descendants whose
-    // `derivation.parentClaimIds` contains a retired/superseded claim id.
-    // Phase 2 — drives `cascadeNeedsReviewOnDescendants` in the Firestore
-    // claim-graph adapter.
     {
+      "_comment": "Veritas — retire-cascade lookup.",
       "collectionGroup": "veritasClaims",
       "queryScope": "COLLECTION",
       "fields": [
@@ -96,12 +268,8 @@
       ]
     },
 
-    // ─────────────────────────────────────────────────────────────
-    // Veritas — claim links
-    // linksFrom(id): projectId + from
-    // linksTo(id):   projectId + to
-    // ─────────────────────────────────────────────────────────────
     {
+      "_comment": "Veritas — links by source claim.",
       "collectionGroup": "veritasClaimLinks",
       "queryScope": "COLLECTION",
       "fields": [
@@ -110,6 +278,7 @@
       ]
     },
     {
+      "_comment": "Veritas — links by target claim.",
       "collectionGroup": "veritasClaimLinks",
       "queryScope": "COLLECTION",
       "fields": [
@@ -118,12 +287,8 @@
       ]
     },
 
-    // ─────────────────────────────────────────────────────────────
-    // Veritas — contradictions
-    // listContradictions: projectId (+ status?) + detectedAt DESC
-    // contradictionsOf(claimId): two queries, (projectId + a) and (projectId + b)
-    // ─────────────────────────────────────────────────────────────
     {
+      "_comment": "Veritas — contradictions listing.",
       "collectionGroup": "veritasContradictions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -157,15 +322,8 @@
       ]
     },
 
-    // ─────────────────────────────────────────────────────────────
-    // Veritas — episodes
-    // list/export: projectId + timestamp ASC
-    // recent(k):   projectId + timestamp DESC
-    // ofType:      projectId + type + timestamp
-    // forClaim:    three array-contains queries against claimsReferenced /
-    //              claimsCreated / claimsRetired
-    // ─────────────────────────────────────────────────────────────
     {
+      "_comment": "Veritas — episodes chronological.",
       "collectionGroup": "veritasEpisodes",
       "queryScope": "COLLECTION",
       "fields": [
@@ -215,5 +373,24 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "_comment": "Realtime SSE — TTL policy. Firestore will auto-delete docs whose ttlExpiresAt has passed.",
+      "collectionGroup": "events",
+      "fieldPath": "ttlExpiresAt",
+      "ttl": true,
+      "indexes": [
+        { "queryScope": "COLLECTION", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "_comment": "Pulse — rejection cooldown TTL.",
+      "collectionGroup": "rejections",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": [
+        { "queryScope": "COLLECTION", "order": "ASCENDING" }
+      ]
+    }
+  ]
 }
