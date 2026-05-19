@@ -6,6 +6,9 @@ import MobileBottomNav from "@/components/app/MobileBottomNav";
 import NewProjectModal from "@/components/app/NewProjectModal";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { PresenceStrip } from "@/components/collab/PresenceStrip";
+import { CursorOverlay } from "@/components/collab/CursorOverlay";
+import { usePresence } from "@/hooks/usePresence";
 
 /**
  * AppShell — floating dark sidebar on desktop, bottom bar on mobile.
@@ -21,6 +24,9 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showNewProject, setShowNewProject] = useState(false);
+  // Global "personal" doc id so PresenceStrip is always live. Each
+  // page can mount its own useCollab for a feature-scoped doc.
+  const { peers } = usePresence({ kind: "lattice-tree", projectId: "personal", resourceId: "shell" });
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
@@ -38,10 +44,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0 focus:outline-none">
         {children}
       </main>
-      {/* Notification bell — floating top-right on desktop. */}
-      <div className="hidden md:block fixed top-4 right-4 z-40">
+      {/* Floating top-right cluster: presence strip + notification bell.
+          Both desktop-only; mobile gets the bell only via in-app bell
+          surface inside MobileBottomNav (TBD). */}
+      <div className="hidden md:flex fixed top-4 right-4 z-40 items-center gap-2">
+        <PresenceStrip peers={peers} />
         <NotificationBell />
       </div>
+      {/* Remote screen cursors (Lattice / Sync / Calendar surfaces). */}
+      <CursorOverlay peers={peers} />
       <MobileBottomNav onNewProject={() => setShowNewProject(true)} />
       <NewProjectModal
         open={showNewProject}

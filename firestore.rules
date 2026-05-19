@@ -11,6 +11,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null
                          && request.auth.uid == userId;
+
+      // Nested project subtree — covers Yjs collab state (NEW 17)
+      // and per-project IO writes (NEW 23). Recursive wildcard so we
+      // don't have to enumerate /assertions, /documents, /yjs/{guid}/
+      // updates, /yjs/{guid}/_snapshot, /blocks, /constraints, etc.
+      match /projects/{projectId}/{document=**} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
     }
 
     // Projects — only the owner can CRUD

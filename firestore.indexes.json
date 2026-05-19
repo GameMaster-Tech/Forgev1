@@ -9,6 +9,13 @@
       ]
     },
     {
+      "collectionGroup": "updates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "at", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "documents",
       "queryScope": "COLLECTION",
       "fields": [

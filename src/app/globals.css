@@ -53,6 +53,16 @@
   --accent: #F97316;
   --sand: #EA580C;
   --blue: #2563EB;
+
+  /* ── Cursor palette (collab) — 8 stable hashed-uid colours ── */
+  --cursor-0: var(--violet);
+  --cursor-1: var(--cyan);
+  --cursor-2: var(--warm);
+  --cursor-3: var(--rose);
+  --cursor-4: var(--green);
+  --cursor-5: #8B5CF6;
+  --cursor-6: #14B8A6;
+  --cursor-7: #EAB308;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -795,6 +805,52 @@ html {
   background-size: 200% 100%;
   animation: gradient-sweep 4s linear infinite;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Collaboration cursors (TipTap CollaborationCursor extension)
+   ═══════════════════════════════════════════════════════════════ */
+
+.ProseMirror .collaboration-cursor__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 2px solid;
+  border-right: 0;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.ProseMirror .collaboration-cursor__label {
+  position: absolute;
+  top: -1.5em;
+  left: -2px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #FAF9F7;
+  padding: 2px 5px;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+.ProseMirror .collaboration-cursor__selection {
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.dark .ProseMirror .collaboration-cursor__label {
+  color: #09090B;
+}
+.dark .ProseMirror .collaboration-cursor__selection {
+  mix-blend-mode: lighten;
+}
+
+/* Allow .no-scrollbar utility (used by responsive sub-nav). */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* ═══ Math nodes (KaTeX) ═══ */
 .forge-math-inline {
