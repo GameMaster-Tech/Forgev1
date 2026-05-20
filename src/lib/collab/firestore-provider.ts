@@ -29,6 +29,7 @@ import * as Y from "yjs";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
@@ -91,24 +92,37 @@ export class FirestoreCollabProvider implements CollabProvider {
     this.phase = "connecting";
     this.setStatus("connecting");
     const updatesCol = collection(this.args.fs, `${this.path}/updates`);
-    const snapshotRef = doc(this.args.fs, `${this.path}/_snapshot`);
 
-    // 1) Apply any existing snapshot.
+    // 1) Apply any existing snapshot + replay recent updates.
+    //
+    //    The snapshot lives at `<path>/_snapshot/current` (8 segments,
+    //    valid doc path). Earlier drafts of this method tried to
+    //    `doc(fs, "<path>/_snapshot")` which is 7 segments — Firestore
+    //    rightly throws because that's a collection path, not a doc.
+    //    Old behaviour also queried the parent path as a collection
+    //    via `collection(fs, this.path)` — `this.path` ends with the
+    //    Y.Doc guid, which is a document id, not a collection id, so
+    //    that call was malformed too.
     try {
-      const snapDocs = await getDocs(query(collection(this.args.fs, this.path), where("_kind", "==", "snapshot")));
-      void snapDocs;
-      const snapSnap = await getDocs(query(updatesCol, orderBy("at", "asc")));
-      const allUpdates = snapSnap.docs.map((d) => d.data() as { update: string; at: number; peerId: string });
-      for (const u of allUpdates) {
-        const bytes = decodeBase64(u.update);
-        Y.applyUpdate(this.args.doc, bytes, "remote");
-        this.seenUpdateIds.add(snapSnap.docs[allUpdates.indexOf(u)].id);
+      const snapshotRef = doc(this.args.fs, `${this.path}/_snapshot/current`);
+      const snapshotSnap = await getDoc(snapshotRef);
+      if (snapshotSnap.exists()) {
+        const data = snapshotSnap.data() as { update: string };
+        if (data?.update) {
+          Y.applyUpdate(this.args.doc, decodeBase64(data.update), "remote");
+        }
+      }
+      const updatesSnap = await getDocs(query(updatesCol, orderBy("at", "asc")));
+      for (const d of updatesSnap.docs) {
+        const data = d.data() as { update: string };
+        if (!data?.update) continue;
+        Y.applyUpdate(this.args.doc, decodeBase64(data.update), "remote");
+        this.seenUpdateIds.add(d.id);
       }
     } catch (err) {
       void err;
       // Hydration failure is non-fatal; we still want live sync to come up.
     }
-    void snapshotRef;
 
     // 2) Subscribe to NEW updates only (we already drained existing).
     this.unsubSnapshot = onSnapshot(

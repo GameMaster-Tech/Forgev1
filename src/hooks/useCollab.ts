@@ -147,19 +147,63 @@ export function useCollab(id: CollabDocId | null): UseCollabResult | null {
     };
   }, [acquired, user?.uid, user?.displayName, user?.email]);
 
-  // Peer list — subscribe to awareness changes via useSyncExternalStore
-  // with rAF coalescing.
+  // Peer list — cached via a ref so getSnapshot returns a stable
+  // reference until the awareness layer actually changes. Without
+  // this, useSyncExternalStore re-runs every render, returns a fresh
+  // array, and React infinite-loops with "Maximum update depth
+  // exceeded" / "The result of getSnapshot should be cached".
+  //
+  // The cache is invalidated ONLY inside the subscriber's onChange
+  // handler (which runs on real awareness mutations). getSnapshot is
+  // a pure ref read.
+  const peersCacheRef = useRef<PresenceState[]>(EMPTY_PEERS);
+
   const subscribePeers = useCallback(
     (notify: () => void) => {
-      if (!acquired) return () => {};
+      if (!acquired) {
+        peersCacheRef.current = EMPTY_PEERS;
+        return () => {};
+      }
       let raf: number | null = null;
+      const recompute = () => {
+        const states = acquired.awareness.getStates();
+        const now = Date.now();
+        const out: PresenceState[] = [];
+        const selfPeerId = peerIdRef.current;
+        states.forEach((state) => {
+          if (!state) return;
+          const presence = state as PresenceState;
+          if (!presence.peerId || !presence.uid) return;
+          if (presence.peerId === selfPeerId) return;
+          if (now - presence.lastActiveAt > IDLE_THRESHOLD_MS && presence.activity?.type !== "idle") {
+            out.push({ ...presence, activity: { type: "idle" } });
+          } else {
+            out.push(presence);
+          }
+        });
+        out.sort((a, b) => a.peerId.localeCompare(b.peerId));
+        // If the new list is structurally identical to the cached
+        // one, keep the cached reference so React skips the render.
+        const prev = peersCacheRef.current;
+        if (prev.length === out.length && prev.every((p, i) => p.peerId === out[i].peerId
+            && p.activity?.type === out[i].activity?.type
+            && p.cursor === out[i].cursor
+            && p.lastActiveAt === out[i].lastActiveAt)) {
+          return;
+        }
+        peersCacheRef.current = out;
+        notify();
+      };
       const onChange = () => {
         if (raf != null) return;
         raf = requestAnimationFrame(() => {
           raf = null;
-          notify();
+          recompute();
         });
       };
+      // Seed the cache once on subscribe so the very first
+      // getSnapshot call has the right value.
+      recompute();
       acquired.awareness.on("change", onChange);
       return () => {
         if (raf != null) cancelAnimationFrame(raf);
@@ -169,31 +213,10 @@ export function useCollab(id: CollabDocId | null): UseCollabResult | null {
     [acquired],
   );
 
-  const peers = useSyncExternalStore(
-    subscribePeers,
-    useCallback(() => {
-      if (!acquired) return EMPTY_PEERS;
-      const states = acquired.awareness.getStates();
-      const now = Date.now();
-      const out: PresenceState[] = [];
-      const selfPeerId = peerIdRef.current;
-      states.forEach((state) => {
-        if (!state) return;
-        const presence = state as PresenceState;
-        if (!presence.peerId || !presence.uid) return;
-        if (presence.peerId === selfPeerId) return;
-        // Mark stale peers idle.
-        if (now - presence.lastActiveAt > IDLE_THRESHOLD_MS && presence.activity?.type !== "idle") {
-          out.push({ ...presence, activity: { type: "idle" } });
-        } else {
-          out.push(presence);
-        }
-      });
-      // Stable sort by peerId so avatars don't reshuffle every poll.
-      return out.sort((a, b) => a.peerId.localeCompare(b.peerId));
-    }, [acquired]),
-    () => EMPTY_PEERS,
-  );
+  const getPeers = useCallback(() => peersCacheRef.current, []);
+  const getServerPeers = useCallback<() => PresenceState[]>(() => EMPTY_PEERS, []);
+
+  const peers = useSyncExternalStore(subscribePeers, getPeers, getServerPeers);
 
   /* ─── presence setters ─── */
 
