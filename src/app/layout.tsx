@@ -1,21 +1,20 @@
 import type { Metadata } from "next";
-import { Urbanist, DM_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/context/AuthContext";
+
+// ── Self-hosted brand fonts ─────────────────────────────────────────
+// We ship Urbanist (display) and DM Sans (body) via @fontsource so
+// there is zero runtime dependency on Google Fonts. Switched from
+// `next/font/google` because corporate TLS interception was causing
+// the fetch to fail and silently fall back to system fonts.
+//
+// `*-variable/index.css` covers the latin + latin-ext subsets across
+// the full 100–900 weight axis with a single WOFF2 each.
+import "@fontsource-variable/urbanist";
+import "@fontsource-variable/dm-sans";
+
 import "katex/dist/katex.min.css";
 import "./globals.css";
-
-const urbanist = Urbanist({
-  subsets: ["latin"],
-  variable: "--font-urbanist",
-  display: "swap",
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-dm-sans",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Forge — AI Research Workspace",
@@ -39,7 +38,19 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${urbanist.variable} ${dmSans.variable} h-full antialiased`}
+      // Set the same CSS variables the rest of the codebase relies on
+      // (`var(--font-urbanist)`, `var(--font-dm-sans)` via globals.css
+      // `@theme inline`). The fontsource families are `Urbanist Variable`
+      // and `DM Sans Variable`; fallbacks preserve metrics on first paint.
+      style={
+        {
+          "--font-urbanist":
+            "'Urbanist Variable', Urbanist, ui-sans-serif, system-ui, sans-serif",
+          "--font-dm-sans":
+            "'DM Sans Variable', 'DM Sans', ui-sans-serif, system-ui, sans-serif",
+        } as React.CSSProperties
+      }
+      className="h-full antialiased"
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
