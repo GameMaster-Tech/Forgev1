@@ -25,6 +25,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyRequest } from "@/lib/server/auth";
 import { getAdminFirestore } from "@/lib/firebase/admin";
 import { REJECTION_TTL_MS, rejectionKey } from "@/lib/pulse/rejection";
+import {
+  enforceRateLimit,
+  identifyClient,
+  rateLimitResponse,
+  RATE_LIMIT_MODERATE,
+} from "@/lib/server/rate-limit";
 
 interface RejectBody {
   projectId?: string;
@@ -36,6 +42,13 @@ interface RejectBody {
 export async function POST(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const rl = enforceRateLimit(
+    req,
+    { routeId: "pulse.refactor.reject", ...RATE_LIMIT_MODERATE },
+    identifyClient(req, user.uid),
+  );
+  if (!rl.ok) return rateLimitResponse(rl);
 
   let payload: RejectBody;
   try {
@@ -81,7 +94,9 @@ export async function POST(req: NextRequest) {
       expiresAt: new Date(expiresAt).toISOString(),
     });
   } catch (err) {
-    console.error("[pulse.refactor.reject] persist failed:", err);
+    console.error("[pulse.refactor.reject] persist failed", {
+      message: err instanceof Error ? err.message : "unknown",
+    });
     return NextResponse.json({ error: "persist failed" }, { status: 500 });
   }
 }

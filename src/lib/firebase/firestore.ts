@@ -84,6 +84,12 @@ export interface FirestoreDocument {
   verifiedCount: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  /**
+   * Optional id of the parent document — null/absent for top-level
+   * docs. Sub-pages render nested in the project tree and surface as
+   * breadcrumbs in the editor.
+   */
+  parentId?: string | null;
 }
 
 /* ─── Projects ─── */
@@ -196,7 +202,8 @@ export async function deleteProject(projectId: string) {
 export async function createDocument(
   userId: string,
   projectId: string,
-  title: string
+  title: string,
+  parentId: string | null = null,
 ) {
   try {
     const ref = await addDoc(collection(db, "documents"), {
@@ -207,6 +214,7 @@ export async function createDocument(
       wordCount: 0,
       citationCount: 0,
       verifiedCount: 0,
+      parentId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });

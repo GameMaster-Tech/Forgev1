@@ -1,34 +1,42 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+/**
+ * Project — workspace home.
+ *
+ * Matches the rest of the Forge UI scheme (teams / projects / calendar):
+ * standard motion.header with eyebrow + h1 + subtitle + primary CTA,
+ * 8/4 main+rail body. Main column hosts the document list; the rail
+ * carries the project meta (mode, system instructions, planner /
+ * graph links). No gradient hero, no chromatic backgrounds.
+ */
+
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  FileText,
-  Plus,
-  ArrowRight,
-  Search,
-  ShieldCheck,
   ArrowLeft,
-  Zap,
+  ArrowRight,
   Brain,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  FileText,
+  ListChecks,
+  Loader2,
   Microscope,
   Network,
-  Loader2,
+  Plus,
   X,
-  ChevronDown,
-  ChevronUp,
-  Sparkles,
+  Zap,
   AlertTriangle,
-  ListChecks,
-  Swords,
+  Search,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useProjectsStore, type ResearchMode } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import {
-  getProjectDocuments,
   createDocument,
+  getProjectDocuments,
   type FirestoreDocument,
 } from "@/lib/firebase/firestore";
 
@@ -36,42 +44,39 @@ const ease = [0.22, 0.61, 0.36, 1] as const;
 
 const modeConfig: Record<
   ResearchMode,
-  {
-    label: string;
-    icon: typeof Zap;
-    detail: string;
-    pillClass: string;
-  }
+  { label: string; icon: typeof Zap; detail: string; tone: string }
 > = {
   lightning: {
     label: "Lightning",
     icon: Zap,
-    detail: "3 sources · fast",
-    pillClass: "text-warm bg-warm/10 border-warm/30",
+    detail: "Fast, 3 sources",
+    tone: "text-warm",
   },
   reasoning: {
     label: "Reasoning",
     icon: Brain,
-    detail: "5 sources · balanced",
-    pillClass: "text-cyan bg-cyan/10 border-cyan/30",
+    detail: "Balanced, 5 sources",
+    tone: "text-cyan",
   },
   deep: {
-    label: "Deep research",
+    label: "Deep",
     icon: Microscope,
-    detail: "10 sources · exhaustive",
-    pillClass: "text-rose bg-rose/10 border-rose/30",
+    detail: "Exhaustive, 10+ sources",
+    tone: "text-rose",
   },
 };
 
-function timeAgo(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "Yesterday";
-  return `${days}d ago`;
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  const w = Math.floor(d / 7);
+  return `${w}w`;
 }
 
 export default function ProjectPage({
@@ -87,13 +92,14 @@ export default function ProjectPage({
   const projectsLoading = useProjectsStore((s) => s.loading);
   const projectsLoaded = useProjectsStore((s) => s.loaded);
   const projectError = useProjectsStore((s) => s.error);
-  const [showNewDoc, setShowNewDoc] = useState(false);
-  const [newDocTitle, setNewDocTitle] = useState("");
-  const [showInstructions, setShowInstructions] = useState(false);
+
   const [docs, setDocs] = useState<FirestoreDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState<string | null>(null);
+  const [showNewDoc, setShowNewDoc] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
 
   useEffect(() => {
     if (user?.uid) fetchProjects(user.uid);
@@ -113,14 +119,14 @@ export default function ProjectPage({
         if (!cancelled) setDocs(result);
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "Unable to load documents right now.";
+          err instanceof Error ? err.message : "Couldn't load documents.";
         console.warn("Failed to load documents:", message);
         if (!cancelled) setDocsError(message);
       } finally {
         if (!cancelled) setDocsLoading(false);
       }
     }
-    load();
+    void load();
     return () => {
       cancelled = true;
     };
@@ -130,11 +136,7 @@ export default function ProjectPage({
     if (!newDocTitle.trim() || !user?.uid || creating) return;
     setCreating(true);
     try {
-      const docId = await createDocument(
-        user.uid,
-        projectId,
-        newDocTitle.trim()
-      );
+      const docId = await createDocument(user.uid, projectId, newDocTitle.trim());
       setShowNewDoc(false);
       setNewDocTitle("");
       router.push(`/project/${projectId}/doc/${docId}`);
@@ -145,19 +147,55 @@ export default function ProjectPage({
     }
   };
 
+  const sortedDocs = useMemo(
+    () =>
+      [...docs].sort(
+        (a, b) =>
+          (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0),
+      ),
+    [docs],
+  );
+
+  // Group docs into a parent→children tree so sub-pages render
+  // nested under their parent. Anything whose parentId points at a
+  // doc that doesn't exist (e.g. parent was deleted) is treated as
+  // top-level so we never lose data behind a broken edge.
+  const tree = useMemo(() => {
+    const childrenOf = new Map<string, FirestoreDocument[]>();
+    const known = new Set(sortedDocs.map((d) => d.id));
+    const roots: FirestoreDocument[] = [];
+    for (const d of sortedDocs) {
+      const parent = d.parentId && known.has(d.parentId) ? d.parentId : null;
+      if (parent) {
+        const arr = childrenOf.get(parent);
+        if (arr) arr.push(d);
+        else childrenOf.set(parent, [d]);
+      } else {
+        roots.push(d);
+      }
+    }
+    return { roots, childrenOf };
+  }, [sortedDocs]);
+
+  /* ───── loading / error / not-found states ───── */
+
   if (
     !project &&
-    (authLoading || projectsLoading || (user?.uid && !projectsLoaded && !projectError))
+    (authLoading ||
+      projectsLoading ||
+      (user?.uid && !projectsLoaded && !projectError))
   ) {
     return (
-      <div className="relative h-screen flex items-center justify-center bg-background">
-        <div className="fixed inset-0 chromatic-bg pointer-events-none" />
-        <div className="relative text-center max-w-sm border border-border bg-white/60 dark:bg-surface/60 backdrop-blur-sm px-10 py-9">
-          <Loader2 size={20} className="text-violet animate-spin mx-auto mb-5" />
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet mb-2">
-            Loading workspace
+      <div className="min-h-full bg-background flex items-center justify-center">
+        <div className="text-center max-w-sm border border-border bg-surface px-10 py-9">
+          <Loader2
+            size={18}
+            className="text-violet animate-spin mx-auto mb-4"
+          />
+          <p className="text-[10px] uppercase tracking-[0.18em] text-violet font-semibold mb-2">
+            Opening
           </p>
-          <p className="text-sm text-gray">Opening the selected project.</p>
+          <p className="text-[13px] text-muted">Loading your project…</p>
         </div>
       </div>
     );
@@ -165,25 +203,27 @@ export default function ProjectPage({
 
   if (!project && projectError) {
     return (
-      <div className="relative h-screen flex items-center justify-center bg-background">
-        <div className="fixed inset-0 chromatic-bg pointer-events-none" />
-        <div className="relative text-center max-w-md border border-border bg-white/60 dark:bg-surface/60 backdrop-blur-sm px-10 py-9">
-          <div className="w-12 h-12 border border-border mx-auto mb-5 flex items-center justify-center bg-surface/60">
-            <AlertTriangle size={18} className="text-warm" />
+      <div className="min-h-full bg-background flex items-center justify-center">
+        <div className="text-center max-w-md border border-border bg-surface px-10 py-9">
+          <div className="w-10 h-10 border border-border bg-background mx-auto mb-4 flex items-center justify-center">
+            <AlertTriangle size={16} className="text-warm" />
           </div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-warm mb-2">
-            Connection interrupted
+          <p className="text-[10px] uppercase tracking-[0.18em] text-warm font-semibold mb-2">
+            Can&apos;t reach Firebase
           </p>
-          <p className="font-display font-extrabold text-[28px] text-black dark:text-foreground mb-2 tracking-[-0.02em] leading-[1.05]">
-            Workspace data is unavailable.
-          </p>
-          <p className="text-[13px] text-gray mb-6">{projectError}</p>
+          <h2 className="font-display font-bold text-foreground text-2xl tracking-[-0.022em] mb-2">
+            Project unavailable.
+          </h2>
+          <p className="text-[13px] text-muted mb-5">{projectError}</p>
           <button
             onClick={() => user?.uid && fetchProjects(user.uid)}
-            className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-bold text-white bg-violet px-4 py-2.5 transition-colors hover:bg-violet/90"
+            className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-white bg-violet hover:bg-violet/90 px-4 py-2 transition-colors"
           >
-            <Loader2 size={12} className={projectsLoading ? "animate-spin" : ""} />
-            Retry
+            <Loader2
+              size={12}
+              className={projectsLoading ? "animate-spin" : ""}
+            />
+            Try again
           </button>
         </div>
       </div>
@@ -192,31 +232,26 @@ export default function ProjectPage({
 
   if (!project) {
     return (
-      <div className="relative h-screen flex items-center justify-center bg-background">
-        <div className="fixed inset-0 pointer-events-none" />
-        <div className="relative text-center max-w-sm">
-          <div className="w-14 h-14 border border-border mx-auto mb-5 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
-            <Search size={20} className="text-muted" />
+      <div className="min-h-full bg-background flex items-center justify-center">
+        <div className="text-center max-w-sm">
+          <div className="w-12 h-12 border border-border bg-surface mx-auto mb-4 flex items-center justify-center">
+            <Search size={16} className="text-muted" />
           </div>
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <div className="w-6 h-[2px] bg-violet" />
-            <span className="text-[10px] font-bold text-violet uppercase tracking-[0.2em]">
-              404 · Missing
-            </span>
-          </div>
-          <p className="font-display font-extrabold text-[32px] text-black dark:text-foreground mb-2 tracking-[-0.02em] leading-[1.05]">
-            Project not found
-            <span className="bg-gradient-to-r from-violet to-cyan bg-clip-text text-transparent">.</span>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold mb-2">
+            Not found
           </p>
-          <p className="text-[13px] text-gray mb-6">
-            This project may have been deleted or moved.
+          <h2 className="font-display font-bold text-foreground text-2xl tracking-[-0.022em] mb-2">
+            Project not found.
+          </h2>
+          <p className="text-[13px] text-muted mb-5">
+            It may have been deleted or moved.
           </p>
           <Link
             href="/projects"
-            className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-bold text-white bg-violet px-4 py-2.5 transition-colors hover:bg-violet/90"
+            className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-white bg-violet hover:bg-violet/90 px-4 py-2 transition-colors"
           >
             <ArrowLeft size={12} />
-            Dashboard
+            Back to projects
           </Link>
         </div>
       </div>
@@ -224,564 +259,541 @@ export default function ProjectPage({
   }
 
   const mc = modeConfig[project.mode];
-  const totalCitations = docs.reduce((a, d) => a + d.citationCount, 0);
-  const totalVerified = docs.reduce((a, d) => a + d.verifiedCount, 0);
-  const verifiedPct =
-    totalCitations > 0
-      ? Math.round((totalVerified / totalCitations) * 100)
-      : 0;
 
   return (
-      <div className="min-h-screen bg-background overflow-y-auto relative">
-      {/* Chromatic bg */}
-      <div className="fixed inset-0 chromatic-bg pointer-events-none" />
-      {/* Dot grid */}
-      <div
-        className="fixed inset-0 opacity-[0.03] dark:opacity-[0.04] pointer-events-none"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, var(--foreground) 0.5px, transparent 0)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-      {/* Floating shapes */}
-
-
-
-      {/* ── Nav bar ── */}
-      <motion.nav
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+    <div className="min-h-full bg-background">
+      {/* ─── Header ─── */}
+      <motion.header
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="relative z-20 sticky top-0 h-12 flex items-center justify-between px-6 border-b border-border bg-background/80 backdrop-blur-md"
+        className="border-b border-border px-6 sm:px-10 pt-10 pb-6"
       >
         <Link
           href="/projects"
-          className="text-[11px] uppercase tracking-[0.15em] text-muted hover:text-violet font-bold transition-colors flex items-center gap-2"
+          className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] font-medium text-muted hover:text-foreground mb-6 transition-colors"
         >
-          <ArrowLeft size={12} />
-          Dashboard
+          <ArrowLeft size={11} strokeWidth={2} />
+          Projects
         </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/project/${projectId}/planner`}
-            className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-foreground font-bold border border-border hover:border-foreground/20 px-3 py-1.5 transition-colors"
-          >
-            <ListChecks size={11} />
-            Planner
-          </Link>
-          <Link
-            href={`/project/${projectId}/counterforge`}
-            className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-rose font-bold border border-border hover:border-rose/30 px-3 py-1.5 transition-colors"
-          >
-            <Swords size={11} />
-            Counterforge
-          </Link>
-          <Link
-            href={`/project/${projectId}/graph`}
-            className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-foreground font-bold border border-border hover:border-foreground/20 px-3 py-1.5 transition-colors"
-          >
-            <Network size={11} />
-            Graph
-          </Link>
+        <div className="flex items-end justify-between gap-6 flex-wrap">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
+              <mc.icon
+                size={11}
+                strokeWidth={1.75}
+                className={mc.tone}
+              />
+              {mc.label} · {mc.detail}
+            </p>
+            <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
+              {project.name}
+            </h1>
+            <p className="text-[13px] text-muted mt-2 max-w-xl leading-relaxed">
+              {docs.length} document{docs.length === 1 ? "" : "s"}
+              {docs.length > 0
+                ? `, ${docs.reduce((a, d) => a + d.citationCount, 0)} citation${
+                    docs.reduce((a, d) => a + d.citationCount, 0) === 1
+                      ? ""
+                      : "s"
+                  }`
+                : ""}
+              .
+            </p>
+          </div>
           <button
             onClick={() => setShowNewDoc(true)}
-            className="group relative flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-white bg-violet hover:bg-violet/90 px-3 py-1.5 font-bold transition-colors overflow-hidden"
+            className="flex items-center gap-2 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.12em] px-5 py-2.5 transition-colors duration-150 shrink-0"
           >
-            <Plus size={11} strokeWidth={2.5} className="relative" />
-            <span className="relative">New doc</span>
+            <Plus size={12} strokeWidth={2.25} />
+            New document
           </button>
         </div>
-      </motion.nav>
+      </motion.header>
 
-      {/* ══════════════════════════════════════════════
-         HERO HEADER
-         ══════════════════════════════════════════════ */}
-      <div className="relative z-10 overflow-hidden header-gradient">
-        <div className="relative max-w-6xl mx-auto px-8 pt-12 pb-10">
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, ease }}
-            className="flex items-center gap-3 mb-5 flex-wrap"
-          >
-            <div className="w-8 h-[2px] bg-violet" />
-            <span className="text-[11px] font-semibold text-violet uppercase tracking-[0.2em]">
-              Workspace
-            </span>
-            <span className="text-[10px] text-muted">·</span>
-            <span
-              className={`text-[10px] font-bold uppercase tracking-[0.12em] inline-flex items-center gap-1.5 px-2 py-0.5 border ${mc.pillClass}`}
-            >
-              <mc.icon size={10} strokeWidth={2} />
-              {mc.label}
-            </span>
-            <span className="text-[10px] text-muted">·</span>
-            <span className="text-[10px] uppercase tracking-[0.12em] text-muted">
-              {mc.detail}
-            </span>
-          </motion.div>
-
-          <div className="flex items-end justify-between gap-6 flex-wrap mb-8">
-            <div className="flex-1 min-w-[280px]">
-              <motion.h1
-                initial={{ opacity: 0, y: 30, rotateX: -15 }}
-                animate={{ opacity: 1, y: 0, rotateX: 0 }}
-                transition={{ duration: 0.6, ease }}
-                className="font-display font-extrabold text-black dark:text-foreground tracking-[-0.03em] leading-[1.02]"
-                style={{ fontSize: "clamp(2.4rem, 5vw, 3.8rem)" }}
+      {/* ─── Body ─── */}
+      <div className="grid grid-cols-12 gap-x-0">
+        {/* Main column */}
+        <div className="col-span-12 lg:col-span-8 px-6 sm:px-10 pt-8 pb-16 lg:border-r lg:border-border">
+          {/* Inline new-doc bar */}
+          <AnimatePresence>
+            {showNewDoc ? (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.22, ease }}
+                className="overflow-hidden mb-5"
               >
-                {project.name}
-                <span className="bg-gradient-to-r from-violet to-cyan bg-clip-text text-transparent">.</span>
-              </motion.h1>
-              <motion.p
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease, delay: 0.1 }}
-                className="text-base text-gray mt-2"
-              >
-                {docs.length} document{docs.length === 1 ? "" : "s"} · {totalCitations} citation{totalCitations === 1 ? "" : "s"} · {verifiedPct}% verified
-              </motion.p>
-            </div>
-
-            <motion.button
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease, delay: 0.18 }}
-              onClick={() => setShowNewDoc(true)}
-              className="group flex items-center gap-2.5 px-5 py-3 bg-black dark:bg-white text-white dark:text-black hover:bg-violet dark:hover:bg-violet dark:hover:text-white transition-all duration-200 relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-violet via-blue to-cyan opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <Plus size={15} strokeWidth={2.5} className="relative" />
-              <span className="relative text-[12px] font-bold uppercase tracking-[0.12em]">
-                New Document
-              </span>
-            </motion.button>
-          </div>
-
-          {/* ── Stats row ── */}
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease, delay: 0.24 }}
-            className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-foreground/[0.06] pt-6 text-[12px] text-muted"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-                Mode
-              </span>
-              <span className="font-bold text-foreground">{mc.label}</span>
-              <span className="text-foreground/55">— {mc.detail}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-                Documents
-              </span>
-              <span className="font-bold tabular-nums text-foreground">
-                {docsLoading ? "…" : docs.length}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-                Citations
-              </span>
-              <span className="font-bold tabular-nums text-foreground">
-                {totalCitations}
-              </span>
-            </div>
-            {totalCitations > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-                  Verified
-                </span>
-                <span className="font-bold tabular-nums text-violet">
-                  {verifiedPct}%
-                </span>
-              </div>
-            )}
-            {docsError && (
-              <span className="text-rose">Error loading documents</span>
-            )}
-          </motion.div>
-
-          {/* Instructions toggle */}
-          {project.systemInstructions && (
-            <div className="mt-6">
-              <button
-                onClick={() => setShowInstructions(!showInstructions)}
-                className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-muted hover:text-violet font-bold transition-colors"
-              >
-                {showInstructions ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                System instructions
-              </button>
-              <AnimatePresence>
-                {showInstructions && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.22, ease }}
-                    className="overflow-hidden"
+                <div className="flex items-center gap-3 px-4 py-3 bg-surface border border-border">
+                  <FileText size={14} className="text-violet shrink-0" />
+                  <input
+                    type="text"
+                    value={newDocTitle}
+                    onChange={(e) => setNewDocTitle(e.target.value)}
+                    placeholder="Document title"
+                    autoFocus
+                    className="flex-1 bg-transparent text-[14px] text-foreground placeholder:text-muted focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setShowNewDoc(false);
+                        setNewDocTitle("");
+                      }
+                      if (e.key === "Enter") void handleCreateDoc();
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateDoc}
+                    disabled={creating || !newDocTitle.trim()}
+                    className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-white bg-violet hover:bg-violet/90 px-3 py-2 transition-colors disabled:opacity-40"
                   >
-                    <div className="mt-3 px-4 py-3 bg-white/60 dark:bg-surface/60 backdrop-blur-sm border border-border border-l-[2px] border-l-violet">
-                      <p className="text-[13px] text-muted leading-relaxed">
-                        {project.systemInstructions}
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-
-      </div>
-
-      {/* ══════════════════════════════════════════════
-         DOCUMENTS
-         ══════════════════════════════════════════════ */}
-      <div className="relative z-10 max-w-6xl mx-auto px-8 py-12">
-        {/* Inline new doc bar */}
-        <AnimatePresence>
-          {showNewDoc && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.22, ease }}
-              className="overflow-hidden mb-6"
-            >
-              <div className="flex items-center gap-3 px-5 py-3.5 bg-white/70 dark:bg-surface/70 backdrop-blur-sm border border-border border-l-4 border-l-violet">
-                <div className="w-9 h-9 bg-gradient-to-br from-violet to-cyan flex items-center justify-center shrink-0 shadow-[0_4px_16px_-4px_rgba(37,99,235,0.5)]">
-                  <FileText size={14} className="text-white" />
-                </div>
-                <input
-                  type="text"
-                  value={newDocTitle}
-                  onChange={(e) => setNewDocTitle(e.target.value)}
-                  placeholder="Document title"
-                  autoFocus
-                  className="flex-1 bg-transparent text-[14px] text-foreground placeholder:text-muted focus:outline-none font-medium"
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
+                    {creating ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <>
+                        Create
+                        <ArrowRight size={11} />
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
                       setShowNewDoc(false);
                       setNewDocTitle("");
-                    }
-                    if (e.key === "Enter") handleCreateDoc();
-                  }}
-                />
-                <button
-                  onClick={handleCreateDoc}
-                  disabled={creating || !newDocTitle.trim()}
-                  className="flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-bold text-white bg-violet hover:bg-violet/90 px-4 py-2 transition-all disabled:opacity-40"
-                >
-                  {creating ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <>
-                      Create
-                      <ArrowRight size={12} />
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowNewDoc(false);
-                    setNewDocTitle("");
-                  }}
-                  className="p-1.5 text-muted hover:text-foreground transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                    }}
+                    className="p-1.5 text-muted hover:text-foreground transition-colors"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3, ease, delay: 0.3 }}
-        >
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-[2px] bg-violet" />
-              <span className="text-[11px] font-semibold text-violet uppercase tracking-[0.2em]">
-                Documents
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">
+              Documents
+            </p>
+            {docs.length > 0 ? (
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums">
+                {docs.length} total
               </span>
-            </div>
-            <span className="text-[10px] font-semibold text-violet bg-violet/15 border border-violet/30 px-2.5 py-1">
-              {docs.length}
-            </span>
+            ) : null}
           </div>
 
           {docsLoading ? (
-            <div className="flex items-center gap-3 py-20 justify-center text-sm text-muted border border-border bg-white/50 dark:bg-surface/50 backdrop-blur-sm">
-              <Loader2 size={16} className="animate-spin text-violet" />
-              Loading documents...
+            <div className="flex items-center gap-3 py-16 justify-center text-[13px] text-muted border border-border bg-surface">
+              <Loader2 size={14} className="animate-spin text-violet" />
+              Loading documents…
             </div>
-          ) : docs.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease }}
-              className="relative border border-border bg-white/60 dark:bg-surface/60 backdrop-blur-sm overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-violet/[0.06] via-transparent to-cyan/[0.05] pointer-events-none" />
-              <div className="relative grid md:grid-cols-[1fr_1.2fr] gap-0">
-                <div className="px-10 py-14">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-[2px] bg-violet" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet">
-                      Empty shelf
-                    </span>
-                  </div>
-                  <h3 className="font-display font-extrabold text-3xl text-black dark:text-foreground leading-[1.05] tracking-[-0.02em] mb-3">
-                    Start your first<br />research doc.
-                  </h3>
-                  <p className="text-sm text-gray leading-relaxed mb-6 max-w-sm">
-                    Documents are where research meets writing. Ask, cite,
-                    verify — every fact traceable to a source.
-                  </p>
-                  <button
-                    onClick={() => setShowNewDoc(true)}
-                    className="group inline-flex items-center gap-2 px-4 py-2.5 bg-violet text-white text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-violet/90 transition-colors"
-                  >
-                    <Plus size={13} strokeWidth={2.5} />
-                    Create document
-                    <ArrowRight
-                      size={13}
-                      className="group-hover:translate-x-1 transition-transform"
-                    />
-                  </button>
-                </div>
-                <div className="relative border-l border-border bg-background/30 px-8 py-10 flex flex-col justify-center gap-4">
-                  <EmptyFeature
-                    n="01"
-                    color="violet"
-                    title="Ask with context"
-                    body="Type a question. Forge pulls from 200M+ indexed sources."
-                  />
-                  <EmptyFeature
-                    n="02"
-                    color="cyan"
-                    title="Cite as you write"
-                    body="Inline citations with DOI-verified provenance."
-                  />
-                  <EmptyFeature
-                    n="03"
-                    color="warm"
-                    title="Verify instantly"
-                    body="Every claim checked against its source. Nothing hallucinated."
-                  />
-                </div>
-              </div>
-            </motion.div>
+          ) : docsError ? (
+            <div className="border border-rose/40 bg-rose/[0.06] text-rose text-[12px] px-4 py-3">
+              {docsError}
+            </div>
+          ) : sortedDocs.length === 0 ? (
+            <EmptyDocuments onCreate={() => setShowNewDoc(true)} />
           ) : (
-            <div className="space-y-0">
-              {docs.map((doc, i) => {
-                const verifyPct =
-                  doc.citationCount > 0
-                    ? Math.round((doc.verifiedCount / doc.citationCount) * 100)
-                    : 0;
-                const isVerified = verifyPct === 100 && doc.citationCount > 0;
-                return (
-                  <motion.div
-                    key={doc.id}
-                    initial={{ opacity: 0, x: -20, rotateY: -3 }}
-                    animate={{ opacity: 1, x: 0, rotateY: 0 }}
-                    transition={{ duration: 0.4, ease, delay: 0.34 + i * 0.05 }}
-                  >
-                    <Link
-                      href={`/project/${projectId}/doc/${doc.id}`}
-                      className="group relative flex items-center gap-6 px-6 py-5 bg-white/70 dark:bg-surface/70 backdrop-blur-sm border border-border border-l-4 border-l-violet hover:bg-violet/[0.06] hover:border-violet/30 transition-all duration-200 -mt-px hover:translate-x-1"
-                    >
-                      {/* Index + ID */}
-                      <div className="flex flex-col items-start gap-1.5 shrink-0 w-[80px]">
-                        <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-white bg-violet px-2 py-0.5">
-                          Doc {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <span className="text-[9px] text-muted font-mono">
-                          D-{doc.id.slice(-4).toUpperCase()}
-                        </span>
-                      </div>
-
-                      {/* Monogram */}
-                      <div className="w-12 h-12 bg-gradient-to-br from-violet to-cyan flex items-center justify-center text-white font-display font-black text-lg shrink-0 shadow-[0_4px_16px_-4px_rgba(37,99,235,0.5)]">
-                        <FileText size={18} strokeWidth={2.25} />
-                      </div>
-
-                      {/* Title + meta */}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-display font-bold text-[17px] text-black dark:text-foreground truncate group-hover:text-violet transition-colors tracking-[-0.01em]">
-                          {doc.title}
-                        </div>
-                        <div
-                          className="text-[12px] text-gray truncate mt-0.5 flex items-center gap-2"
-                          suppressHydrationWarning
-                        >
-                          <span>
-                            {timeAgo(doc.updatedAt?.toMillis?.() ?? Date.now())}
-                          </span>
-                          {isVerified && (
-                            <>
-                              <span className="text-border">·</span>
-                              <span className="text-green inline-flex items-center gap-1">
-                                <ShieldCheck size={10} />
-                                Fully verified
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Stats */}
-                      <div className="hidden md:flex items-center gap-8 shrink-0 pr-2">
-                        <StatTick
-                          label="Words"
-                          value={
-                            doc.wordCount > 999
-                              ? `${(doc.wordCount / 1000).toFixed(1)}k`
-                              : String(doc.wordCount)
-                          }
-                          color="cyan"
-                        />
-                        <StatTick
-                          label="Cites"
-                          value={String(doc.citationCount)}
-                          color="warm"
-                        />
-                      </div>
-
-                      <ArrowRight
-                        size={14}
-                        className="text-muted group-hover:text-violet group-hover:translate-x-1.5 transition-all shrink-0"
-                      />
-                    </Link>
-                  </motion.div>
-                );
-              })}
-            </div>
+            <ul className="divide-y divide-border border border-border bg-surface">
+              {tree.roots.map((doc, i) => (
+                <DocumentTreeRow
+                  key={doc.id}
+                  doc={doc}
+                  childrenOf={tree.childrenOf}
+                  projectId={projectId}
+                  depth={0}
+                  order={i}
+                  onAddSubPage={async (parentId, title) => {
+                    if (!user?.uid) return;
+                    setCreating(true);
+                    try {
+                      const newId = await createDocument(
+                        user.uid,
+                        projectId,
+                        title.trim() || "Untitled",
+                        parentId,
+                      );
+                      router.push(`/project/${projectId}/doc/${newId}`);
+                    } finally {
+                      setCreating(false);
+                    }
+                  }}
+                />
+              ))}
+            </ul>
           )}
-        </motion.div>
+        </div>
 
-        {/* Footer hint */}
-        {docs.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.4, ease, delay: 0.6 }}
-            className="mt-10 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-muted font-bold"
-          >
-            <Sparkles size={11} className="text-violet" />
-            <span>End of documents · {docs.length} total</span>
-          </motion.div>
-        )}
+        {/* Right rail */}
+        <aside className="col-span-12 lg:col-span-4 px-6 sm:px-10 pt-8 pb-16 space-y-6">
+          <ProjectMetaCard
+            mode={mc}
+            createdAt={project.createdAt}
+            updatedAt={project.updatedAt}
+          />
+          {project.systemInstructions ? (
+            <SystemInstructionsCard
+              text={project.systemInstructions}
+              open={showInstructions}
+              onToggle={() => setShowInstructions((v) => !v)}
+            />
+          ) : null}
+          <ToolsCard projectId={projectId} />
+        </aside>
       </div>
     </div>
   );
 }
 
-/* ─ StatCell for hero stats row ─ */
-function StatCell({
-  label,
-  value,
-  accent,
-  Icon,
-  last = false,
+/* ────── tree row (recursive) ────── */
+
+function DocumentTreeRow({
+  doc,
+  childrenOf,
+  projectId,
+  depth,
+  order,
+  onAddSubPage,
 }: {
-  label: string;
-  value: number | string;
-  accent: "violet" | "cyan" | "warm" | "rose";
-  Icon: typeof FileText;
-  last?: boolean;
+  doc: FirestoreDocument;
+  childrenOf: Map<string, FirestoreDocument[]>;
+  projectId: string;
+  depth: number;
+  order: number;
+  onAddSubPage: (parentId: string, title: string) => Promise<void>;
 }) {
-  const accentMap: Record<string, { text: string; bg: string }> = {
-    violet: { text: "text-violet", bg: "bg-violet" },
-    cyan: { text: "text-cyan", bg: "bg-cyan" },
-    warm: { text: "text-warm", bg: "bg-warm" },
-    rose: { text: "text-rose", bg: "bg-rose" },
+  const verifyPct =
+    doc.citationCount > 0
+      ? Math.round((doc.verifiedCount / doc.citationCount) * 100)
+      : 0;
+  const updatedAt = doc.updatedAt?.toMillis?.() ?? Date.now();
+  const children = childrenOf.get(doc.id) ?? [];
+  const [expanded, setExpanded] = useState(true);
+  const [addingChild, setAddingChild] = useState(false);
+  const [childTitle, setChildTitle] = useState("");
+  const [submittingChild, setSubmittingChild] = useState(false);
+
+  const submitChild = async () => {
+    if (!childTitle.trim() || submittingChild) return;
+    setSubmittingChild(true);
+    try {
+      await onAddSubPage(doc.id, childTitle);
+      setChildTitle("");
+      setAddingChild(false);
+    } finally {
+      setSubmittingChild(false);
+    }
   };
-  const a = accentMap[accent];
+
+  // Indent step: 24px per depth — readable without overwhelming.
+  const indent = depth * 24;
   return (
-    <div
-      className={`relative px-5 py-5 md:py-6 border-border ${
-        last ? "" : "border-r border-b md:border-b-0"
-      } group hover:bg-white/60 dark:hover:bg-surface/80 transition-colors`}
+    <motion.li
+      initial={{ opacity: 0, x: -6 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.28, delay: Math.min(order, 12) * 0.04, ease }}
     >
-      <div className="flex items-center gap-2 mb-2">
-        <div className={`w-1.5 h-1.5 ${a.bg}`} />
+      <div className="group relative flex items-center gap-3 pl-5 pr-5 py-3 hover:bg-violet/[0.06] transition-colors duration-150">
         <span
-          className={`text-[9px] font-bold uppercase tracking-[0.2em] ${a.text}`}
+          aria-hidden
+          className="absolute left-0 top-3 bottom-3 w-[2px] bg-border group-hover:bg-violet transition-colors duration-150"
+        />
+        {/* Expander — only renders when the row has children. */}
+        <div
+          style={{ width: indent }}
+          aria-hidden
+          className="shrink-0"
+        />
+        {children.length > 0 ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              setExpanded((v) => !v);
+            }}
+            aria-label={expanded ? "Collapse" : "Expand"}
+            className="text-muted hover:text-violet transition-colors p-1 -ml-1"
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+        ) : (
+          <span className="w-5" aria-hidden />
+        )}
+        <Link
+          href={`/project/${projectId}/doc/${doc.id}`}
+          className="flex items-center gap-4 flex-1 min-w-0"
         >
-          {label}
-        </span>
+          <div className="w-8 h-8 border border-border bg-background flex items-center justify-center shrink-0 group-hover:border-violet/40 transition-colors">
+            <FileText
+              size={13}
+              strokeWidth={1.75}
+              className="text-muted group-hover:text-violet transition-colors"
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display font-bold text-[14.5px] sm:text-[15.5px] text-foreground truncate group-hover:text-violet transition-colors tracking-[-0.01em]">
+              {doc.title}
+            </div>
+            <div className="text-[11px] text-muted mt-0.5 tabular-nums flex items-center gap-2">
+              <span suppressHydrationWarning>{timeAgo(updatedAt)}</span>
+              {doc.wordCount > 0 ? (
+                <>
+                  <span className="text-border">·</span>
+                  <span>{doc.wordCount} words</span>
+                </>
+              ) : null}
+              {doc.citationCount > 0 ? (
+                <>
+                  <span className="text-border">·</span>
+                  <span>
+                    {doc.citationCount} citation{doc.citationCount === 1 ? "" : "s"}
+                    {verifyPct === 100 ? (
+                      <span className="text-green"> · verified</span>
+                    ) : null}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          </div>
+        </Link>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            setAddingChild(true);
+            setExpanded(true);
+          }}
+          aria-label="Add sub-page"
+          title="Add sub-page"
+          className="text-muted opacity-0 group-hover:opacity-100 hover:text-violet transition-all p-1"
+        >
+          <Plus size={12} strokeWidth={2.25} />
+        </button>
+        <ArrowRight
+          size={13}
+          className="text-muted group-hover:text-violet transition-colors shrink-0"
+        />
       </div>
-      <div className="flex items-baseline gap-2">
-        <span
-          className="font-display font-extrabold text-[34px] leading-none text-black dark:text-foreground tracking-[-0.02em] tabular-nums"
+
+      {/* Inline new sub-page input */}
+      {addingChild ? (
+        <div
+          className="flex items-center gap-2 pr-5 py-2 bg-surface/60 border-t border-border"
+          style={{ paddingLeft: 20 + indent + 24 + 16 }}
         >
-          {value}
-        </span>
-        <Icon size={13} className="text-muted opacity-60" />
+          <FileText size={12} className="text-violet shrink-0" />
+          <input
+            type="text"
+            value={childTitle}
+            onChange={(e) => setChildTitle(e.target.value)}
+            placeholder="Sub-page title"
+            autoFocus
+            className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted focus:outline-none"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setAddingChild(false);
+                setChildTitle("");
+              }
+              if (e.key === "Enter") void submitChild();
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitChild}
+            disabled={!childTitle.trim() || submittingChild}
+            className="text-[10px] uppercase tracking-[0.12em] font-semibold text-white bg-violet hover:bg-violet/90 disabled:opacity-40 px-3 py-1.5 transition-colors"
+          >
+            Create
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddingChild(false);
+              setChildTitle("");
+            }}
+            aria-label="Cancel"
+            className="text-muted hover:text-foreground p-1"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      ) : null}
+
+      {expanded && children.length > 0 ? (
+        <ul className="border-t border-border">
+          {children.map((c, i) => (
+            <DocumentTreeRow
+              key={c.id}
+              doc={c}
+              childrenOf={childrenOf}
+              projectId={projectId}
+              depth={depth + 1}
+              order={i}
+              onAddSubPage={onAddSubPage}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </motion.li>
+  );
+}
+
+/* ────── empty state ────── */
+
+function EmptyDocuments({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="border border-dashed border-border bg-surface/40 p-10 text-center">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted font-medium mb-2">
+        No documents yet
+      </p>
+      <h3 className="font-display font-bold text-foreground text-[20px] tracking-[-0.018em] mb-2">
+        Start your first one.
+      </h3>
+      <p className="text-[12.5px] text-muted leading-relaxed max-w-sm mx-auto mb-5">
+        Ask, cite, and write — every fact stays traceable to a source.
+      </p>
+      <button
+        onClick={onCreate}
+        className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-white bg-violet hover:bg-violet/90 px-4 py-2 transition-colors"
+      >
+        <Plus size={12} strokeWidth={2.25} />
+        Create document
+      </button>
+    </div>
+  );
+}
+
+/* ────── right rail cards ────── */
+
+function ProjectMetaCard({
+  mode,
+  createdAt,
+  updatedAt,
+}: {
+  mode: { label: string; icon: typeof Zap; detail: string; tone: string };
+  createdAt: number;
+  updatedAt: number;
+}) {
+  return (
+    <div className="border border-border bg-surface p-5">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">
+        Project
+      </p>
+      <div className="space-y-2 text-[12px] text-foreground tabular-nums">
+        <Row label="Mode" value={`${mode.label} — ${mode.detail}`} />
+        <Row label="Created" value={new Date(createdAt).toLocaleDateString()} />
+        <Row label="Last edit" value={timeAgo(updatedAt) + " ago"} />
       </div>
     </div>
   );
 }
 
-function StatTick({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-  color: "cyan" | "warm";
-}) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="text-right">
-      <div
-        className="font-display font-bold text-lg leading-none tabular-nums text-black dark:text-foreground"
-      >
-        {value}
-      </div>
-      <div className="text-[9px] uppercase tracking-[0.15em] text-muted font-bold mt-1">
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-[10px] uppercase tracking-[0.14em] text-muted font-medium">
         {label}
-      </div>
+      </span>
+      <span className="text-foreground/85 text-[12px] truncate text-right">
+        {value}
+      </span>
     </div>
   );
 }
 
-function EmptyFeature({
-  n,
-  color,
-  title,
-  body,
+function SystemInstructionsCard({
+  text,
+  open,
+  onToggle,
 }: {
-  n: string;
-  color: "violet" | "cyan" | "warm";
-  title: string;
-  body: string;
+  text: string;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const map = {
-    violet: "text-violet",
-    cyan: "text-cyan",
-    warm: "text-warm",
-  } as const;
   return (
-    <div className="flex items-start gap-4">
-      <span
-        className={`font-display font-black text-2xl leading-none ${map[color]} tracking-tight shrink-0 w-10`}
+    <div className="border border-border bg-surface">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-3 px-5 py-3 hover:bg-violet/[0.04] transition-colors"
       >
-        {n}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-bold text-black dark:text-foreground">
-          {title}
-        </div>
-        <div className="text-[11px] text-gray leading-relaxed mt-0.5">
-          {body}
-        </div>
-      </div>
+        <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">
+          AI instructions
+        </span>
+        {open ? (
+          <ChevronUp size={12} className="text-muted" />
+        ) : (
+          <ChevronDown size={12} className="text-muted" />
+        )}
+      </button>
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease }}
+            className="overflow-hidden"
+          >
+            <div className="px-5 py-3 border-t border-border">
+              <p className="text-[12.5px] text-foreground leading-relaxed whitespace-pre-wrap">
+                {text}
+              </p>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ToolsCard({ projectId }: { projectId: string }) {
+  const tools = [
+    {
+      icon: ListChecks,
+      label: "Planner",
+      hint: "What's left to research",
+      href: `/project/${projectId}/planner`,
+    },
+    {
+      icon: Network,
+      label: "Graph",
+      hint: "See how sources connect",
+      href: `/project/${projectId}/graph`,
+    },
+  ];
+  return (
+    <div className="border border-border bg-surface p-5">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">
+        Tools
+      </p>
+      <ul className="space-y-1">
+        {tools.map((t) => (
+          <li key={t.label}>
+            <Link
+              href={t.href}
+              className="group flex items-center gap-3 px-2 py-2 -mx-2 hover:bg-violet/[0.06] transition-colors"
+            >
+              <div className="w-7 h-7 border border-border bg-background flex items-center justify-center shrink-0 group-hover:border-violet/40 transition-colors">
+                <t.icon
+                  size={12}
+                  strokeWidth={1.75}
+                  className="text-muted group-hover:text-violet transition-colors"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] text-foreground font-medium group-hover:text-violet transition-colors">
+                  {t.label}
+                </div>
+                <div className="text-[10px] text-muted mt-0.5">{t.hint}</div>
+              </div>
+              <ArrowRight
+                size={11}
+                className="text-muted opacity-0 group-hover:opacity-100 transition-opacity"
+              />
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

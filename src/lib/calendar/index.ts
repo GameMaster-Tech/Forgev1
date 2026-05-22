@@ -15,6 +15,7 @@ export {
   disconnect as disconnectGoogleCalendar,
   listEvents as listGoogleEvents,
   readState as readGoogleState,
+  refreshState as refreshGoogleState,
   type GoogleAccount,
   type GoogleIntegrationState,
   type IntegrationStatus,

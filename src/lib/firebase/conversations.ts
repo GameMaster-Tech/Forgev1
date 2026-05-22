@@ -373,13 +373,20 @@ export async function appendMessage(
 
 export async function getMessages(
   conversationId: string,
-  opts: { max?: number; afterId?: string } = {},
+  opts: { max?: number; afterId?: string; userId?: string } = {},
 ) {
   // Default ascending — chronological order is what UIs render.
-  const q = query(
-    collection(db, "conversations", conversationId, "messages"),
+  // When caller passes `userId`, filter by it so the Firestore
+  // security rule that allows `resource.data.userId == auth.uid` can
+  // accept the list query without falling back to a parent traversal.
+  const constraints = [
+    ...(opts.userId ? [where("userId", "==", opts.userId)] : []),
     orderBy("createdAt", "asc"),
     ...(opts.max ? [fbLimit(opts.max)] : []),
+  ];
+  const q = query(
+    collection(db, "conversations", conversationId, "messages"),
+    ...constraints,
   );
   const snap = await getDocs(q);
   return snap.docs.map(

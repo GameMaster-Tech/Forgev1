@@ -3,10 +3,10 @@
  *
  * Storage layout (per-user, per-project):
  *
- *   users/{uid}/projects/{pid}/lattice/trees/{rootId}
+ *   users/{uid}/projects/{pid}/lattice/{rootId}              ← doc (6 segments)
  *     ├── projectId, rootId, updatedAt
  *
- *   users/{uid}/projects/{pid}/lattice/trees/{rootId}/subtasks/{taskId}
+ *   users/{uid}/projects/{pid}/lattice/{rootId}/subtasks/{taskId}  ← doc (8 segments)
  *     ├── full AtomicSubtask shape (serialized)
  *
  * The TaskTree is keyed by `rootId` — one tree per parentTask. Subtasks
@@ -52,10 +52,17 @@ import type {
 
 /* ───────────── paths ───────────── */
 
-const TREES_COLLECTION = "lattice"; // /users/{uid}/projects/{pid}/lattice/...
+const TREES_COLLECTION = "lattice"; // /users/{uid}/projects/{pid}/lattice/{rootId}
 
+// Firestore segment-parity rules: doc paths must have EVEN segment
+// count, collections ODD. Earlier drafts of this file nested the tree
+// doc under `lattice/trees/{rootId}`, which made the subtasks
+// collection land at 8 segments (illegal). The fix: flatten by one
+// level — the tree doc is `lattice/{rootId}` (6 segments, valid doc)
+// and the subtasks live at `lattice/{rootId}/subtasks` (7 segments,
+// valid collection) → `lattice/{rootId}/subtasks/{taskId}` (8, valid doc).
 function treeDocPath(uid: string, pid: string, rootId: string): string[] {
-  return ["users", uid, "projects", pid, TREES_COLLECTION, "trees", rootId];
+  return ["users", uid, "projects", pid, TREES_COLLECTION, rootId];
 }
 
 function subtasksColPath(uid: string, pid: string, rootId: string): string[] {

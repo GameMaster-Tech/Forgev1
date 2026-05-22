@@ -1,10 +1,47 @@
-import Anthropic from "@anthropic-ai/sdk";
+/**
+ * POST /api/ai/write — Groq-backed writing assistant (Llama 3.3 70B).
+ *
+ * Security posture:
+ *   • requireUser — Firebase ID token
+ *   • enforceRateLimit — EXPENSIVE preset (Groq is metered)
+ *   • Strict input validation: `command` is a closed enum, `text` and
+ *     `context` are bounded.
+ *   • Output is the model's text response only — no metadata, no
+ *     usage counts, no raw model object.
+ */
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+import { isAuthFailure, requireUser } from "@/lib/server/api-auth";
+import {
+  enforceRateLimit,
+  identifyClient,
+  rateLimitResponse,
+  RATE_LIMIT_EXPENSIVE,
+} from "@/lib/server/rate-limit";
+import { DEFAULT_MODEL, groqChat } from "@/lib/ai/groq";
 
-type AICommand = "continue" | "summarize" | "expand" | "simplify" | "fix-grammar" | "make-concise" | "rewrite-formal" | "rewrite-casual";
+type AICommand =
+  | "continue"
+  | "summarize"
+  | "expand"
+  | "simplify"
+  | "fix-grammar"
+  | "make-concise"
+  | "rewrite-formal"
+  | "rewrite-casual";
+
+const VALID_COMMANDS = new Set<AICommand>([
+  "continue",
+  "summarize",
+  "expand",
+  "simplify",
+  "fix-grammar",
+  "make-concise",
+  "rewrite-formal",
+  "rewrite-casual",
+]);
+
+const MAX_TEXT_CHARS = 12_000;
+const MAX_CONTEXT_CHARS = 16_000;
 
 const systemPrompt = `You are a writing assistant embedded in Forge, an AI research workspace. You help researchers write, edit, and refine their documents.
 
@@ -35,32 +72,59 @@ const commandPrompts: Record<AICommand, (text: string, context: string) => strin
 };
 
 export async function POST(request: Request) {
+  const auth = await requireUser(request);
+  if (isAuthFailure(auth)) return auth;
+
+  const rl = enforceRateLimit(
+    request,
+    { routeId: "ai.write", ...RATE_LIMIT_EXPENSIVE },
+    identifyClient(request, auth.uid),
+  );
+  if (!rl.ok) return rateLimitResponse(rl);
+
   try {
-    const { command, text, context = "" } = await request.json();
+    const body = (await request.json()) as {
+      command?: unknown;
+      text?: unknown;
+      context?: unknown;
+    };
+    const command = typeof body.command === "string" ? (body.command as AICommand) : null;
+    const text = typeof body.text === "string" ? body.text : "";
+    const context = typeof body.context === "string" ? body.context : "";
 
     if (!command || !text) {
       return Response.json({ error: "Command and text are required" }, { status: 400 });
     }
-
-    if (!commandPrompts[command as AICommand]) {
+    if (!VALID_COMMANDS.has(command)) {
       return Response.json({ error: "Invalid command" }, { status: 400 });
     }
+    if (text.length > MAX_TEXT_CHARS) {
+      return Response.json(
+        { error: `text too long (max ${MAX_TEXT_CHARS} chars)` },
+        { status: 400 },
+      );
+    }
+    if (context.length > MAX_CONTEXT_CHARS) {
+      return Response.json(
+        { error: `context too long (max ${MAX_CONTEXT_CHARS} chars)` },
+        { status: 400 },
+      );
+    }
 
-    const userPrompt = commandPrompts[command as AICommand](text, context);
-
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+    const userPrompt = commandPrompts[command](text, context);
+    const result = await groqChat({
+      model: DEFAULT_MODEL,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
+      maxTokens: 1024,
+      temperature: 0.5,
     });
 
-    const content = message.content[0];
-    const result = content.type === "text" ? content.text : "";
-
-    return Response.json({ result });
+    return Response.json({ result: result.content });
   } catch (error) {
-    console.error("AI write error:", error);
+    console.error("[ai.write] upstream failure", {
+      message: error instanceof Error ? error.message : "unknown",
+    });
     return Response.json({ error: "AI generation failed" }, { status: 500 });
   }
 }

@@ -123,20 +123,11 @@ export function RefactorReview({
     >
       <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-violet" />
 
-      <div className="px-5 py-3 border-b border-white/[0.08] flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText size={12} strokeWidth={2} className="text-violet shrink-0" />
-          <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium truncate">
-            Refactor · {proposal.documentId} · {proposal.kind === "value-swap" ? "safe swap" : "needs review"}
-          </span>
-        </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {triggers.map((a) => (
-            <span key={a.id} className="text-[10px] uppercase tracking-[0.12em] border border-white/[0.1] bg-white/[0.04] text-background/70 px-2 py-1 font-medium">
-              {a.label}
-            </span>
-          ))}
-        </div>
+      <div className="px-5 py-3 border-b border-white/[0.08] flex items-center min-w-0">
+        <FileText size={12} strokeWidth={2} className="text-violet shrink-0 mr-2" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-medium truncate">
+          {proposal.documentId} · {proposal.kind === "value-swap" ? "safe swap" : "needs review"}
+        </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/[0.06]">
@@ -153,6 +144,39 @@ export function RefactorReview({
           <pre className="text-[13px] text-background leading-relaxed whitespace-pre-wrap font-sans break-words">{proposal.after}</pre>
         </div>
       </div>
+
+      {triggers.length > 0 && (
+        <div className="px-5 py-4 border-t border-white/[0.08]">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-background/60 font-semibold mb-3">
+            Sources · why this rewrite
+          </div>
+          <ul className="space-y-2">
+            {triggers.map((a) => {
+              const isNumber = a.value.type === "number";
+              const valueText =
+                isNumber
+                  ? `${(a.value as { value: number; unit?: string }).value}${(a.value as { value: number; unit?: string }).unit ? " " + (a.value as { value: number; unit?: string }).unit : ""}`
+                  : a.value.type === "date"
+                  ? (a.value as { value: string }).value
+                  : a.value.type === "string"
+                  ? (a.value as { value: string }).value
+                  : String((a.value as { value: boolean }).value);
+              return (
+                <li
+                  key={a.id}
+                  className="flex items-baseline justify-between gap-3 text-[12px] text-background/85 tabular-nums"
+                >
+                  <span className="font-medium truncate">{a.label}</span>
+                  <span className="text-background/55 text-[11px]">
+                    {valueText}
+                    {a.source ? <span className="ml-2 text-background/40">· {a.source}</span> : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="px-5 py-4 border-t border-white/[0.08] flex items-center gap-2 flex-wrap">
         <button

@@ -194,7 +194,7 @@ function FeaturedRow({ project }: { project: Project }) {
       </p>
       <Link
         href={`/project/${project.id}`}
-        className="group block border border-border bg-surface p-5 hover:border-violet/50 hover:bg-violet/[0.04] transition-colors duration-150 relative"
+        className="group block border border-border bg-surface p-5 forge-lift hover:border-violet/50 hover:bg-violet/[0.04] relative"
       >
         <span
           aria-hidden

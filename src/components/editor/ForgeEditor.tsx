@@ -10,6 +10,9 @@ import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
 import { InlineMath, BlockMath } from "./extensions/Math";
 import { ClaimMention, type ClaimTrustResolver } from "./extensions/ClaimMention";
+import { DataTable } from "./extensions/DataTable";
+import { InlineEmbed } from "./extensions/InlineEmbed";
+import { CommentMark } from "./extensions/CommentMark";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Bold,
@@ -40,6 +43,7 @@ import {
   Check,
   RotateCcw,
   Sigma,
+  Table,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -125,6 +129,13 @@ const aiCommands: AICommandOption[] = [
 export interface EditorHandle {
   getPlainText: () => string;
   jumpToText: (needle: string) => boolean;
+  /**
+   * The underlying TipTap editor — exposed so hooks like
+   * `useDocContradictions` and `useSemanticReactivity` can subscribe
+   * to `update` events directly without re-implementing the wiring
+   * the page already owns.
+   */
+  editor: import("@tiptap/react").Editor;
 }
 
 interface ForgeEditorProps {
@@ -514,6 +525,9 @@ export default function ForgeEditor({
       Typography,
       InlineMath,
       BlockMath,
+      DataTable,
+      InlineEmbed,
+      CommentMark,
       ClaimMention.configure({
         resolveTrust: (key) => claimResolverRef.current?.(key) ?? null,
       }),
@@ -593,6 +607,7 @@ export default function ForgeEditor({
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         return true;
       },
+      editor,
     };
     onReady(handle);
   }, [editor, onReady]);
@@ -872,6 +887,14 @@ export default function ForgeEditor({
             <span className="font-mono text-[11px] font-bold tracking-tight">
               Î£âˆ«
             </span>
+          </Btn>
+
+          <Btn
+            onClick={() => editor.chain().focus().insertDataTable().run()}
+            active={editor.isActive("dataTable")}
+            title="Database table"
+          >
+            <Table size={15} />
           </Btn>
 
           <Sep />

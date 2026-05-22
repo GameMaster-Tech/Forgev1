@@ -112,6 +112,21 @@ service cloud.firestore {
                             && request.auth.uid == request.resource.data.userId;
       allow update, delete: if request.auth != null
                             && request.auth.uid == resource.data.userId;
+
+      // Comments + reply threads. Ownership inherits from the parent
+      // document via parent traversal, so list queries on the
+      // subcollection work without an extra ownership filter.
+      match /comments/{commentId} {
+        allow read, write: if request.auth != null
+                              && request.auth.uid ==
+                                 get(/databases/$(database)/documents/documents/$(docId)).data.userId;
+
+        match /replies/{replyId} {
+          allow read, write: if request.auth != null
+                                && request.auth.uid ==
+                                   get(/databases/$(database)/documents/documents/$(docId)).data.userId;
+        }
+      }
     }
 
     // Research queries — only the owner can read/create
@@ -120,6 +135,53 @@ service cloud.firestore {
                     && request.auth.uid == resource.data.userId;
       allow create: if request.auth != null
                     && request.auth.uid == request.resource.data.userId;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Conversations — chat threads for the /research surface.
+    //
+    // Schema (see src/lib/firebase/conversations.ts):
+    //   /conversations/{conversationId}
+    //     ├ userId                  — owner (denormalised; rule key)
+    //     ├ projectId, title, mode  — scope + display
+    //     ├ messageCount, ...
+    //     └ /messages/{messageId} subcollection
+    //         ├ userId              — also denormalised
+    //         ├ role, content, ...
+    //
+    // Rule strategy: owner-only RW on the parent doc; messages
+    // inherit ownership via parent traversal so subcollection list
+    // queries don't need a per-message ownerId filter.
+    // ────────────────────────────────────────────────────────────
+
+    match /conversations/{conversationId} {
+      allow read:           if request.auth != null
+                              && request.auth.uid == resource.data.userId;
+      allow create:         if request.auth != null
+                              && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if request.auth != null
+                              && request.auth.uid == resource.data.userId;
+
+      match /messages/{messageId} {
+        // Two paths:
+        //   1. Direct: the message itself carries `userId`, so a single
+        //      read can rely on `resource.data.userId == auth.uid`.
+        //   2. Parent traversal: covers cases where `resource` isn't
+        //      populated (e.g. some list-query rule evaluations) by
+        //      walking up to the conversation.
+        allow read:           if request.auth != null
+                                && (
+                                  request.auth.uid == resource.data.userId
+                                  || request.auth.uid ==
+                                     get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId
+                                );
+        allow create:         if request.auth != null
+                                && request.auth.uid == request.resource.data.userId
+                                && request.auth.uid ==
+                                   get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId;
+        allow update, delete: if request.auth != null
+                                && request.auth.uid == resource.data.userId;
+      }
     }
 
     // ────────────────────────────────────────────────────────────
@@ -236,7 +298,9 @@ service cloud.firestore {
 
     // Team invites — pending invitations sent by email.
     match /teamInvites/{inviteId} {
-      // Inviter can read; recipient can read if their auth email matches.
+      // Inviter can read; recipient can read if their auth email matches;
+      // any team member can read invites for their team (so the team
+      // detail page can surface the pending list).
       allow read: if request.auth != null
                   && (
                     request.auth.uid == resource.data.inviterId
@@ -244,6 +308,7 @@ service cloud.firestore {
                       request.auth.token.email != null
                       && request.auth.token.email.lower() == resource.data.email
                     )
+                    || isTeamMember(resource.data.teamId)
                   );
 
       allow create: if request.auth != null
@@ -481,6 +546,51 @@ service cloud.firestore {
       allow update: if cfAccess()
                     && request.resource.data.ownerId == request.auth.uid;
       allow delete: if cfAccess();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Forge Reactive Workspace — invariant-aware graph layer.
+    //
+    // Three top-level collections, all denormalised by `ownerId`:
+    //   /forge_graph_snapshots/{id} — append-only graph snapshots
+    //                                 written after a Tempo accept
+    //   /forge_tempo_runs/{id}      — append-only Tempo run reports
+    //   /forge_invariants/{id}      — user-saved invariant configs
+    //                                 (Phase 4 builder)
+    //
+    // The same ownership pattern as every other top-level collection
+    // in the app.
+    // ────────────────────────────────────────────────────────────
+
+    function forgeGraphCreate() {
+      return request.auth != null
+             && request.resource.data.ownerId == request.auth.uid
+             && request.resource.data.projectId is string;
+    }
+
+    function forgeGraphAccess() {
+      return request.auth != null
+             && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /forge_graph_snapshots/{snapshotId} {
+      allow read:   if forgeGraphAccess();
+      allow create: if forgeGraphCreate();
+      // Snapshots are immutable — no update/delete path.
+    }
+
+    match /forge_tempo_runs/{runId} {
+      allow read:   if forgeGraphAccess();
+      allow create: if forgeGraphCreate();
+      // Tempo runs are immutable — append-only audit log.
+    }
+
+    match /forge_invariants/{invariantId} {
+      allow read:           if forgeGraphAccess();
+      allow create:         if forgeGraphCreate();
+      allow update, delete: if forgeGraphAccess()
+                            && (request.resource == null
+                                || request.resource.data.ownerId == request.auth.uid);
     }
   }
 }

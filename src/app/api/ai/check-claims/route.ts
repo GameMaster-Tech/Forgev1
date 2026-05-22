@@ -1,8 +1,27 @@
-import Anthropic from "@anthropic-ai/sdk";
+/**
+ * POST /api/ai/check-claims — extracts claims from a draft via Groq
+ * (Llama 3.3 70B).
+ *
+ * Security posture:
+ *   • requireUser — Firebase ID token
+ *   • enforceRateLimit — EXPENSIVE preset (Groq is metered)
+ *   • Input validation — `text` must be a string between 40 and
+ *     MAX_TEXT_CHARS characters.
+ *   • Output is filtered: only claims whose text actually appears in the
+ *     submitted draft are returned (guards against hallucinated quotes).
+ *   • Errors are scrubbed before returning.
+ */
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+import { isAuthFailure, requireUser } from "@/lib/server/api-auth";
+import {
+  enforceRateLimit,
+  identifyClient,
+  rateLimitResponse,
+  RATE_LIMIT_EXPENSIVE,
+} from "@/lib/server/rate-limit";
+import { DEFAULT_MODEL, groqChat } from "@/lib/ai/groq";
+
+const MAX_TEXT_CHARS = 25_000;
 
 /* ─── Types ─── */
 
@@ -71,12 +90,28 @@ function extractJson(raw: string): string {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireUser(request);
+  if (isAuthFailure(auth)) return auth;
+
+  const rl = enforceRateLimit(
+    request,
+    { routeId: "ai.check-claims", ...RATE_LIMIT_EXPENSIVE },
+    identifyClient(request, auth.uid),
+  );
+  if (!rl.ok) return rateLimitResponse(rl);
+
   try {
     const { text } = (await request.json()) as { text?: string };
 
     if (!text || typeof text !== "string" || text.trim().length < 40) {
       return Response.json(
         { error: "Need at least 40 characters of text to check claims." },
+        { status: 400 },
+      );
+    }
+    if (text.length > MAX_TEXT_CHARS) {
+      return Response.json(
+        { error: `text too long (max ${MAX_TEXT_CHARS} chars)` },
         { status: 400 },
       );
     }
@@ -87,22 +122,23 @@ export async function POST(request: Request) {
 ${text}
 --- DRAFT END ---`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
+    const result = await groqChat({
+      model: DEFAULT_MODEL,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
+      maxTokens: 2048,
+      temperature: 0.2,
+      jsonResponse: true,
     });
-
-    const block = message.content[0];
-    const raw = block && block.type === "text" ? block.text : "";
-    const json = extractJson(raw);
+    const json = extractJson(result.content);
 
     let parsed: { claims?: Omit<ExtractedClaim, "id">[] };
     try {
       parsed = JSON.parse(json);
     } catch {
-      console.error("Claim-check JSON parse failed:", raw.slice(0, 300));
+      // Do not log `raw` — it could contain reflected user input. Log
+      // only the failure shape.
+      console.error("[ai.check-claims] model returned malformed JSON");
       return Response.json(
         { error: "Model returned malformed response. Try again." },
         { status: 502 },
@@ -134,7 +170,9 @@ ${text}
 
     return Response.json({ claims });
   } catch (err) {
-    console.error("Claim-check error:", err);
+    console.error("[ai.check-claims] upstream failure", {
+      message: err instanceof Error ? err.message : "unknown",
+    });
     return Response.json(
       { error: "Claim checking failed. Please try again." },
       { status: 500 },

@@ -33,6 +33,13 @@ import ForgeEditor, {
 } from "@/components/editor/ForgeEditor";
 import ResearchSidePanel from "@/components/editor/ResearchSidePanel";
 import ClaimCheckPanel from "@/components/editor/ClaimCheckPanel";
+import { ShareLinkButton } from "@/components/editor/ShareLinkButton";
+import { ContradictionBanner } from "@/components/editor/ContradictionBanner";
+import { useDocContradictions } from "@/hooks/useDocContradictions";
+import { CommentsPanel } from "@/components/editor/CommentsPanel";
+import { useDocComments } from "@/hooks/useDocComments";
+import type { Editor } from "@tiptap/react";
+import { MessageSquare, AlertTriangle } from "lucide-react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -85,6 +92,83 @@ export default function EditorPage({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestContentRef = useRef("");
   const editorHandleRef = useRef<EditorHandle | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
+
+  // On-demand intra-document contradiction scan via Groq. Fires only
+  // when the user clicks "Check" — never on debounce — so we don't
+  // bill Groq on every keystroke.
+  const {
+    contradictions,
+    scanning,
+    lastScanAt,
+    staleSinceLastScan,
+    rescan: rescanContradictions,
+  } = useDocContradictions({ editor });
+  const hasScanned = lastScanAt != null;
+
+  const handleJumpToContradiction = useCallback((text: string) => {
+    editorHandleRef.current?.jumpToText(text);
+  }, []);
+
+  // ── Comments ─────────────────────────────────────────────────
+  const commentsApi = useDocComments(docId);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
+
+  const startComment = useCallback(() => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return; // nothing selected
+    const text = editor.state.doc.textBetween(from, to, " ").trim();
+    if (!text) return;
+    setPendingAnchor(text);
+    setCommentsOpen(true);
+    setResearchOpen(false);
+    setClaimsOpen(false);
+  }, [editor]);
+
+  const handleAddComment = useCallback(
+    async (body: string) => {
+      if (!pendingAnchor || !editor) return;
+      const id = await commentsApi.addComment({
+        anchorText: pendingAnchor,
+        body,
+      });
+      if (!id) return;
+      // Re-select the original anchor and wrap it with the new
+      // comment mark so the highlight appears immediately.
+      const ok = editorHandleRef.current?.jumpToText(pendingAnchor);
+      if (ok) {
+        editor.chain().focus().addComment(id).run();
+      }
+      setPendingAnchor(null);
+    },
+    [pendingAnchor, editor, commentsApi],
+  );
+
+  const openComments = useCallback(() => {
+    setResearchOpen(false);
+    setClaimsOpen(false);
+    setCommentsOpen((v) => !v);
+  }, []);
+
+  // Track whether the editor currently has a non-empty selection so
+  // the "Comment" toolbar affordance lights up only when actionable.
+  const [hasSelection, setHasSelection] = useState(false);
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => {
+      const { from, to } = editor.state.selection;
+      setHasSelection(from !== to);
+    };
+    editor.on("selectionUpdate", update);
+    editor.on("blur", update);
+    update();
+    return () => {
+      editor.off("selectionUpdate", update);
+      editor.off("blur", update);
+    };
+  }, [editor]);
 
   const openResearch = useCallback(() => {
     setClaimsOpen(false);
@@ -301,6 +385,41 @@ export default function EditorPage({
             <Flag size={11} />
             <span className="hidden md:inline">Claims</span>
           </button>
+          {/* Comment — primary action when there's a selection, panel
+              toggle when there isn't. The icon dot turns violet when
+              there are open (unresolved) comments. */}
+          <button
+            type="button"
+            onClick={hasSelection ? startComment : openComments}
+            className={`relative flex items-center gap-1.5 px-2.5 py-1.5 transition-all duration-200 border text-[10px] font-bold uppercase tracking-[0.15em] ${
+              commentsOpen
+                ? "text-white bg-violet border-violet"
+                : "text-violet border-violet/30 hover:bg-violet/[0.08]"
+            }`}
+            title={hasSelection ? "Comment on selection" : "Open comments"}
+          >
+            <MessageSquare size={11} />
+            <span className="hidden md:inline">
+              {hasSelection ? "Comment" : "Comments"}
+            </span>
+            {commentsApi.comments.some((c) => !c.resolved) ? (
+              <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-warm rounded-full" />
+            ) : null}
+          </button>
+          {/* Check for contradictions — on-demand AI call */}
+          <button
+            type="button"
+            onClick={() => void rescanContradictions()}
+            disabled={scanning}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.15em] font-bold border text-warm border-warm/30 hover:bg-warm/[0.08] disabled:opacity-50 transition-all"
+            title="Scan this document for contradicting statements"
+          >
+            <AlertTriangle size={11} />
+            <span className="hidden md:inline">
+              {scanning ? "Checking…" : "Check"}
+            </span>
+          </button>
+          <ShareLinkButton documentId={docId} />
           <button
             type="button"
             onClick={openResearch}
@@ -409,12 +528,28 @@ export default function EditorPage({
             />
           </motion.div>
 
+          {/* Contradiction banner — only renders after the user clicks
+              "Check" (the call into Groq is strictly on-demand). */}
+          {scanning || hasScanned ? (
+            <div className="mb-4">
+              <ContradictionBanner
+                contradictions={contradictions}
+                scanning={scanning}
+                staleSinceLastScan={staleSinceLastScan}
+                hasScanned={hasScanned}
+                onJump={handleJumpToContradiction}
+                onRescan={() => void rescanContradictions()}
+              />
+            </div>
+          ) : null}
+
           <ForgeEditor
             content={editorHtml}
             onUpdate={handleEditorUpdate}
             onWordCountChange={setWordCount}
             onReady={(handle) => {
               editorHandleRef.current = handle;
+              setEditor(handle.editor);
             }}
           />
         </motion.div>
@@ -446,6 +581,23 @@ export default function EditorPage({
                 doi: c.doi,
               });
             }}
+          />
+          <CommentsPanel
+            open={commentsOpen}
+            onClose={() => {
+              setCommentsOpen(false);
+              setPendingAnchor(null);
+            }}
+            comments={commentsApi.comments}
+            repliesByComment={commentsApi.repliesByComment}
+            loading={commentsApi.loading}
+            pendingAnchor={pendingAnchor}
+            onClearPending={() => setPendingAnchor(null)}
+            onAddComment={handleAddComment}
+            onAddReply={commentsApi.addReply}
+            onResolve={commentsApi.resolveComment}
+            onDelete={commentsApi.deleteComment}
+            onJumpToComment={(text) => editorHandleRef.current?.jumpToText(text)}
           />
         </div>
       </div>

@@ -9,6 +9,8 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { PresenceStrip } from "@/components/collab/PresenceStrip";
 import { CursorOverlay } from "@/components/collab/CursorOverlay";
 import { usePresence } from "@/hooks/usePresence";
+import { Tutorial } from "@/components/onboarding/Tutorial";
+import { useGlobalCommands } from "@/hooks/useGlobalCommands";
 
 /**
  * AppShell — floating dark sidebar on desktop, bottom bar on mobile.
@@ -27,6 +29,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Global "personal" doc id so PresenceStrip is always live. Each
   // page can mount its own useCollab for a feature-scoped doc.
   const { peers } = usePresence({ kind: "lattice-tree", projectId: "personal", resourceId: "shell" });
+  // Register the global Cmd-K command set (nav + create + projects).
+  useGlobalCommands({ onNewProject: () => setShowNewProject(true) });
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
@@ -37,8 +41,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         Skip to main content
       </a>
-      {/* Floating dark rail — desktop only */}
-      <div className="hidden md:block shrink-0 sticky top-0 h-screen z-30 p-3">
+      {/* Flush dark rail — desktop only */}
+      <div className="hidden md:block shrink-0 sticky top-0 h-screen z-30">
         <Sidebar onNewProject={() => setShowNewProject(true)} />
       </div>
       <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0 focus:outline-none">
@@ -59,6 +63,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onClose={() => setShowNewProject(false)}
       />
       <CommandPalette />
+      <Tutorial />
     </div>
   );
 }

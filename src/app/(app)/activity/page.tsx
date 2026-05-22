@@ -16,7 +16,6 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   History,
-  Filter,
   GitBranch,
   Activity,
   Network,
@@ -61,7 +60,6 @@ export default function ActivityPage() {
   const [enabledSources, setEnabledSources] = useState<Set<ActivitySource>>(
     () => new Set<ActivitySource>(["sync", "pulse", "lattice", "calendar", "habit", "share", "tempo"]),
   );
-  const [projectFilter, setProjectFilter] = useState<string>("");
   const [timeframe, setTimeframe] = useState<string>("24h");
   const [now, setNow] = useState<number>(() => Date.now());
 
@@ -111,10 +109,9 @@ export default function ActivityPage() {
     const since = tf?.minutes != null ? now - tf.minutes * 60_000 : undefined;
     return filterEvents(merged, {
       sources: enabledSources,
-      projectId: projectFilter.trim() || undefined,
       since,
     });
-  }, [merged, enabledSources, projectFilter, timeframe, now]);
+  }, [merged, enabledSources, timeframe, now]);
 
   return (
     <div className="min-h-full bg-background">
@@ -122,30 +119,22 @@ export default function ActivityPage() {
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease }}
-        className="px-6 sm:px-10 pt-10 pb-6"
+        className="border-b border-border px-6 sm:px-10 pt-10 pb-6"
       >
         <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
           <History size={11} strokeWidth={1.75} />
-          Activity · everything that happened
+          Activity
         </p>
         <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
-          {filtered.length === 0 ? (
-            <>No <span className="text-muted">activity</span> in this window.</>
-          ) : (
-            <><span className="text-violet">{filtered.length}</span> event{filtered.length === 1 ? "" : "s"} · reverse-chronological.</>
-          )}
+          What happened.
         </h1>
-        <p className="text-[13px] text-muted mt-2 max-w-2xl leading-relaxed">
-          Every Sync compile, Pulse run, Lattice rebranch, calendar upsert, habit completion, sharing change, and Tempo replan in one stream — filterable by source, project, and timeframe.
+        <p className="text-[13px] text-muted mt-2 max-w-xl leading-relaxed">
+          A running list of everything Forge did across your projects.
         </p>
       </motion.header>
 
-      <div className="border-y border-border bg-surface/40">
-        <div className="px-6 sm:px-10 py-4 flex flex-col sm:flex-row gap-3 sm:items-center flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-semibold flex items-center gap-1.5">
-            <Filter size={11} />
-            Sources
-          </span>
+      <div className="border-b border-border bg-surface/40">
+        <div className="px-6 sm:px-10 py-4 flex items-center gap-2 flex-wrap">
           {(Object.keys(SOURCE_META) as ActivitySource[]).map((s) => {
             const meta = SOURCE_META[s];
             const Icon = meta.icon;
@@ -156,12 +145,15 @@ export default function ActivityPage() {
                 onClick={() =>
                   setEnabledSources((prev) => {
                     const next = new Set(prev);
-                    if (active) next.delete(s); else next.add(s);
+                    if (active) next.delete(s);
+                    else next.add(s);
                     return next;
                   })
                 }
                 className={`text-[10px] uppercase tracking-[0.12em] font-semibold px-3 py-1.5 border inline-flex items-center gap-1.5 transition-colors ${
-                  active ? "border-violet bg-violet text-white" : "border-border text-muted hover:border-violet hover:text-violet"
+                  active
+                    ? "border-violet bg-violet text-white"
+                    : "border-border text-muted hover:border-violet hover:text-violet"
                 }`}
                 aria-pressed={active}
               >
@@ -170,24 +162,17 @@ export default function ActivityPage() {
               </button>
             );
           })}
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
-            <input
-              type="text"
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-              placeholder="Filter by project id"
-              className="text-[11px] border border-border bg-background px-2 py-1.5 outline-none focus:border-violet w-44"
-            />
-            <select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-              className="text-[11px] border border-border bg-background px-2 py-1.5 outline-none focus:border-violet"
-            >
-              {TIMEFRAMES.map((t) => (
-                <option key={t.key} value={t.key}>{t.label}</option>
-              ))}
-            </select>
-          </div>
+          <select
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value)}
+            className="ml-auto text-[11px] border border-border bg-background px-2 py-1.5 outline-none focus:border-violet"
+          >
+            {TIMEFRAMES.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

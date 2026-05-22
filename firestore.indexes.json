@@ -59,15 +59,6 @@
       ]
     },
     {
-      "_comment": "Lattice — dedup by signature across rebranches.",
-      "collectionGroup": "subtasks",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "signature", "order": "ASCENDING" }
-      ]
-    },
-
-    {
       "_comment": "Tempo / Calendar — events sorted for the grid + status filter.",
       "collectionGroup": "events",
       "queryScope": "COLLECTION",
@@ -105,30 +96,12 @@
     },
 
     {
-      "_comment": "Habits — habit completions ordered newest-first for streak walk.",
-      "collectionGroup": "completions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "date", "order": "DESCENDING" }
-      ]
-    },
-
-    {
       "_comment": "Notifications — unread bell badge query.",
       "collectionGroup": "notifications",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "read", "order": "ASCENDING" },
         { "fieldPath": "at", "order": "DESCENDING" }
-      ]
-    },
-
-    {
-      "_comment": "Realtime SSE — TTL field for auto-delete (configure TTL policy).",
-      "collectionGroup": "events",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "ttlExpiresAt", "order": "ASCENDING" }
       ]
     },
 
@@ -142,15 +115,6 @@
       ]
     },
     {
-      "_comment": "Activity feed — chronological scroll (no filter).",
-      "collectionGroup": "activity",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "at", "order": "DESCENDING" }
-      ]
-    },
-
-    {
       "_comment": "Versions — filter by source + chronological.",
       "collectionGroup": "versions",
       "queryScope": "COLLECTION",
@@ -160,15 +124,6 @@
       ]
     },
     {
-      "_comment": "Versions — chronological scrubber.",
-      "collectionGroup": "versions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "at", "order": "DESCENDING" }
-      ]
-    },
-
-    {
       "_comment": "Sharing — list grants on a resource.",
       "collectionGroup": "shares",
       "queryScope": "COLLECTION",
@@ -177,23 +132,7 @@
         { "fieldPath": "resource.id", "order": "ASCENDING" }
       ]
     },
-    {
-      "_comment": "Sharing — what does principal X have access to?",
-      "collectionGroup": "shares",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "principal.id", "order": "ASCENDING" }
-      ]
-    },
 
-    {
-      "_comment": "Collab — Yjs update replay order.",
-      "collectionGroup": "updates",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "at", "order": "ASCENDING" }
-      ]
-    },
     {
       "_comment": "Collab — Yjs update prune by age (compact() job).",
       "collectionGroup": "updates",
@@ -323,6 +262,37 @@
     },
 
     {
+      "_comment": "Forge Reactive Workspace — graph snapshots per project (newest first). Filter on ownerId is required by the security rules so the rule can verify ownership before returning rows.",
+      "collectionGroup": "forge_graph_snapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "Forge Reactive Workspace — tempo run history per project.",
+      "collectionGroup": "forge_tempo_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "_comment": "Forge Reactive Workspace — saved invariants per project.",
+      "collectionGroup": "forge_invariants",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+
+    {
       "_comment": "Veritas — episodes chronological.",
       "collectionGroup": "veritasEpisodes",
       "queryScope": "COLLECTION",
@@ -373,24 +343,6 @@
       ]
     }
   ],
-  "fieldOverrides": [
-    {
-      "_comment": "Realtime SSE — TTL policy. Firestore will auto-delete docs whose ttlExpiresAt has passed.",
-      "collectionGroup": "events",
-      "fieldPath": "ttlExpiresAt",
-      "ttl": true,
-      "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "_comment": "Pulse — rejection cooldown TTL.",
-      "collectionGroup": "rejections",
-      "fieldPath": "expiresAt",
-      "ttl": true,
-      "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" }
-      ]
-    }
-  ]
+  "_fieldOverridesNote": "TTL field overrides for `events.ttlExpiresAt` and `rejections.expiresAt` require billing-enabled Firestore. Re-enable when the project switches to Blaze plan: see git history of this file for the original entries.",
+  "fieldOverrides": []
 }

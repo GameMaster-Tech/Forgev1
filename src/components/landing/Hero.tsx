@@ -53,13 +53,13 @@ export default function Hero() {
               transition={{ duration: 0.6, ease, delay: 0.08 }}
               className="font-display font-extrabold text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] tracking-[-0.03em] text-black dark:text-foreground mb-6"
             >
-              Stop juggling
+              Research and
               <br />
-              five tabs.
+              write in
               <br />
               <span className="relative inline-block">
                 <span className="relative z-10 bg-gradient-to-r from-violet via-violet to-cyan bg-clip-text text-transparent">
-                  Start forging.
+                  one place.
                 </span>
               </span>
             </motion.h1>
@@ -71,8 +71,8 @@ export default function Hero() {
               transition={{ duration: 0.4, ease, delay: 0.16 }}
               className="text-lg text-gray leading-relaxed mb-10 max-w-md"
             >
-              One workspace. 200M+ sources searched, read, and cited —
-              with every reference DOI-verified before it touches your document.
+              Forge searches 200M+ papers, checks every citation, and helps you write.
+              No more flipping between tabs.
             </motion.p>
 
             {/* CTAs */}
@@ -86,7 +86,7 @@ export default function Hero() {
                 href="/auth/signup"
                 className="group relative flex items-center gap-3 bg-violet text-white px-8 py-4 text-base font-semibold overflow-hidden btn-glow-violet"
               >
-                <span className="relative z-10">Start free — no card needed</span>
+                <span className="relative z-10">Get started — free</span>
                 <ArrowRight
                   size={16}
                   className="relative z-10 group-hover:translate-x-1 transition-transform duration-200"
@@ -96,7 +96,7 @@ export default function Hero() {
                 href="#how-it-works"
                 className="flex items-center gap-2 text-gray hover:text-black dark:hover:text-foreground border border-border hover:border-violet/40 px-6 py-4 transition-all duration-200 text-base"
               >
-                See how it works
+                How it works
               </a>
             </motion.div>
 

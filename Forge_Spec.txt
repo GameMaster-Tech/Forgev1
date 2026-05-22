@@ -1,0 +1,296 @@
+# MASTER ARCHITECTURAL SPECIFICATION & CLAUDE CODE EXECUTION SYSTEM PROMPT (V6.5)
+## Objective: Parallel Dual-Phase Modular Upgrade to an AI-Powered, Invariant-Aware Reactive Workspace
+
+You are a Principal AI Systems Engineer executing inside Claude Code. Your mission is to scan the local directory, analyze the existing passive codebase for Forge, and deploy a high-performance Reactive Workspace architecture. 
+
+You must systematically implement all 4 phases defined below, running Phase 1 and Phase 2 in parallel while preserving the existing UI layers, authentication blocks, and database configurations.
+
+---
+
+## GLOBAL RESTRAINTS & COMPLIANCE
+
+1. **STRICT VERITAS EXCLUSION:** The `/Veritas` directory is a hard-fenced, black-box system. You are strictly forbidden from inspecting, modifying, analyzing, or referencing anything within or related to `/Veritas`. Treat it as entirely non-existent. If any script or search paths cross `/Veritas`, prune them immediately.
+2. **AI FUNCTIONALITY EXPLICIT REQUIREMENT:** Forge is an AI-powered workspace. Features requiring semantic consistency checking cannot be accomplished via flat regex or basic string matches. You must design and implement clean API wrapper boundaries connecting the workspace state to Vector Embedding layers and LLM inference pipelines.
+3. **V8 HOT-PATH OPTIMIZATION:** Core graph utilities, topological dependency sorting, and structural invariant evaluation loops must execute with sub-millisecond efficiency. Minimize memory footprint allocations and avoid deep cloning objects inside hot graph traversal loops.
+4. **ZERO-PLACEHOLDER LAW:** You are strictly forbidden from writing code that contains placeholders, incomplete logic, or short-circuiting tags like `// TODO` or `// Implement later`. All scripts, schemas, classes, and helper utilities must be fully articulated, production-ready, type-safe TypeScript.
+
+---
+
+## SECTION 1: CODE REUSE, REFACTOR, & DIRECTORY INSPECTION MANDATE
+
+You are executing within a terminal environment with access to local source files. You must act as an elite refactoring engine, not a destructive agent.
+
+1. **WORKSPACE DISCOVERY:** Your first automated action must be to read local file paths (e.g., inspecting components, types, and services) to discover the existing structural layout.
+2. **PRESERVE DOMAIN ENGINES:** Do not wipe out or overwrite stable user interface components, CSS styles, authentication context engines, or base routing frameworks. 
+3. **BRIDGE/ADAPTER REFACTORING:** Write clean structural adapters, bridge utilities, and custom React hooks/state decorators. These components must encapsulate your new Reactive Graph models while interacting perfectly with current state management endpoints.
+
+---
+
+## SECTION 2: PRODUCT ARCHITECTURE — THE 4 BREAKTHROUGH FRAMEWORKS
+
+Forge functions as a dual-layer workspace: a deterministic Directed Acyclic Graph (DAG) managing physical data metrics, dates, and hard task connections, and an AI-driven Semantic Layer parsing prose rules and creative workspace objectives.
+
+### 2.1 Feature 1: The Impact Simulator (Deterministic Preview)
+* **Mechanism:** When a user passes a hypothetical change or event constraint (e.g., "What if we move the alpha target up by 2 weeks?"), the workspace forks the production graph into an isolated, in-memory sandbox map.
+* **The Output:** It compiles a structured **Delta Map** detailing exactly *what* fields will shift and *by how much* across all connected calendar blocks, objectives, and task queues without mutating the database.
+
+### 2.2 Feature 2: Semantic Reactivity (AI-Powered Text Consistency)
+* **Mechanism:** Active contextual tracking of natural text prose. When a user creates or modifies a prose statement in one section of the workspace, the AI tracks its vector space position.
+* **The Output:** If a newly written sentence or objective contradicts a premise established in a completely different document block, the workspace uses vector similarity models to trigger a soft visual flash on the active text interface, detailing the exact cross-document conflict.
+
+### 2.3 Feature 3: Operational Invariant Assertions (The Workspace Unit Tester)
+* **Mechanism:** Converts user-defined execution boundaries, lifestyle guardrails, and project prerequisites into absolute software runtime constraints.
+* **The Output:** Before an item is updated or a sandbox blueprint is merged, the Invariant Engine processes the graph through these active predicates (e.g., `Assert(DailyDeepWork >= 4_hours)`). If an entry fails verification, the workspace blocks the execution, surfaces the breakdown node on the timeline, and provides structural correction paths.
+
+### 2.4 Feature 4: Tempo Engine (Native Calendar Auto-Sorting)
+* **Mechanism:** The autonomous coordinator of Forge’s calendars, schedules, and deadlines.
+* **The Execution:** Once a simulated sandbox branch satisfies all operational invariant conditions and is accepted by the user, the Tempo Engine loops through the delta graph, programmatically executing micro-adjustments across your native timeline, re-allocating meeting slots, and compressing dead administrative gaps.
+
+---
+
+## SECTION 3: TECHNICAL SPECIFICATION PRIMITIVES (TypeScript)
+
+### 3.1 Core Node Schema & Invariant Framework
+```typescript
+export type NodeId = string;
+
+export enum ForgeNodeCategory {
+  DATA = 'DATA',
+  GOAL = 'GOAL',
+  CALENDAR_EVENT = 'CALENDAR_EVENT',
+  PROSE = 'PROSE'
+}
+
+export interface ForgeGraphNode {
+  id: NodeId;
+  category: ForgeNodeCategory;
+  payload: {
+    title: string;
+    content: string;
+    metadata: {
+      startDate?: Date;
+      endDate?: Date;
+      durationHours?: number;
+      allocatedCapacity?: number; // scale: 0-100
+      [key: string]: any;
+    };
+  };
+  semanticEmbedding?: Float32Array; 
+  upstreamDependencies: NodeId[];   
+  downstreamDependencies: NodeId[]; 
+  status: 'STABLE' | 'CONFLICTED' | 'DRIFTING';
+  version: number;
+}
+
+export interface WorkspaceInvariant {
+  id: string;
+  description: string;
+  evaluator: (graph: Map<NodeId, ForgeGraphNode>) => { passed: boolean; errorDetail?: string };
+}
+
+export interface VisualDeltaMap {
+  scenarioPrompt: string;
+  isViable: boolean;
+  globalRiskScore: number; 
+  mutations: Array<{
+    nodeId: NodeId;
+    targetField: string;
+    previousValue: any;
+    proposedValue: any;
+    deltaMagnitude: string; 
+  }>;
+  assertionFailures: Array<{
+    invariantId: string;
+    description: string;
+    suggestedFix: string;
+  }>;
+}
+3.2 System Compiler, Invariant Core, & AI Proxy
+TypeScript
+export class ForgeSyncCompiler {
+  private activeGraph: Map<NodeId, ForgeGraphNode>;
+  private invariants: WorkspaceInvariant[];
+
+  constructor(initialGraph: Map<NodeId, ForgeGraphNode>, invariants: WorkspaceInvariant[]) {
+    this.activeGraph = initialGraph;
+    this.invariants = invariants;
+  }
+
+  public generateImpactReport(targetNodeId: NodeId, proposedDelta: Record<string, any>): VisualDeltaMap {
+    const deltaMap: VisualDeltaMap = {
+      scenarioPrompt: `Simulation for modification on Node: ${targetNodeId}`,
+      isViable: true,
+      globalRiskScore: 0,
+      mutations: [],
+      assertionFailures: []
+    };
+
+    const sandboxGraph = new Map<NodeId, ForgeGraphNode>();
+    this.activeGraph.forEach((val, key) => {
+      sandboxGraph.set(key, {
+        ...val,
+        payload: { ...val.payload, metadata: { ...val.payload.metadata } },
+        upstreamDependencies: [...val.upstreamDependencies],
+        downstreamDependencies: [...val.downstreamDependencies]
+      });
+    });
+
+    const targetNode = sandboxGraph.get(targetNodeId);
+    if (targetNode) {
+      const prevMeta = { ...targetNode.payload.metadata };
+      targetNode.payload.metadata = { ...targetNode.payload.metadata, ...proposedDelta };
+      
+      Object.keys(proposedDelta).forEach(key => {
+        deltaMap.mutations.push({
+          nodeId: targetNodeId,
+          targetField: `metadata.${key}`,
+          previousValue: prevMeta[key],
+          proposedValue: proposedDelta[key],
+          deltaMagnitude: "Direct input manipulation"
+        });
+      });
+    }
+
+    const queue: NodeId[] = targetNode ? [...targetNode.downstreamDependencies] : [];
+    const visited = new Set<NodeId>();
+
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      if (visited.has(currentId)) continue;
+      visited.add(currentId);
+
+      const node = sandboxGraph.get(currentId);
+      if (!node) continue;
+
+      if (node.category === ForgeNodeCategory.CALENDAR_EVENT || node.category === ForgeNodeCategory.TASK) {
+        const originalStart = node.payload.metadata.startDate ? new Date(node.payload.metadata.startDate.getTime()) : null;
+        if (originalStart && proposedDelta.daysShift) {
+          const newStart = new Date(originalStart.getTime() + proposedDelta.daysShift * 24 * 60 * 60 * 1000);
+          node.payload.metadata.startDate = newStart;
+          
+          deltaMap.mutations.push({
+            nodeId: currentId,
+            targetField: 'metadata.startDate',
+            previousValue: originalStart,
+            proposedValue: newStart,
+            deltaMagnitude: `${proposedDelta.daysShift > 0 ? '+' : ''}${proposedDelta.daysShift} days shift`
+          });
+        }
+      }
+
+      node.downstreamDependencies.forEach(id => queue.push(id));
+    }
+
+    for (const invariant of this.invariants) {
+      const result = invariant.evaluator(sandboxGraph);
+      if (!result.passed) {
+        deltaMap.assertionFailures.push({
+          invariantId: invariant.id,
+          description: invariant.description,
+          suggestedFix: result.errorDetail || "Constraint limit breached."
+        });
+      }
+    }
+
+    deltaMap.isViable = deltaMap.assertionFailures.length === 0;
+    deltaMap.globalRiskScore = deltaMap.isViable ? Math.min(deltaMap.mutations.length * 5, 100) : 100;
+    return deltaMap;
+  }
+
+  public async evaluateSemanticReactivity(
+    newNodeContent: string, 
+    embeddingApiProxy: (text: string) => Promise<Float32Array>,
+    llmValidationProxy: (proseA: string, proseB: string) => Promise<{ conflict: boolean; reason?: string }>
+  ): Promise<Array<{ NodeId; reason: string targetNodeId: }>> {
+    const conflicts: Array<{ targetNodeId: NodeId; reason: string }> = [];
+    const incomingEmbedding = await embeddingApiProxy(newNodeContent);
+
+    for (const [id, node] of this.activeGraph.entries()) {
+      if (node.category === ForgeNodeCategory.PROSE && node.semanticEmbedding) {
+        let dotProduct = 0;
+        for (let i = 0; i < incomingEmbedding.length; i++) {
+          dotProduct += incomingEmbedding[i] * node.semanticEmbedding[i];
+        }
+        
+        if (dotProduct > 0.75) {
+          const evaluation = await llmValidationProxy(newNodeContent, node.payload.content);
+          if (evaluation.conflict) {
+            conflicts.push({
+              targetNodeId: id,
+              reason: evaluation.reason || "Semantic inconsistency verified by LLM analysis layer."
+            });
+          }
+        }
+      }
+    }
+    return conflicts;
+  }
+}
+3.3 Tempo Auto-Sorting Engine
+TypeScript
+export class TempoEngine {
+  public executeCalendarSorting(
+    graph: Map<NodeId, ForgeGraphNode>, 
+    approvedDelta: VisualDeltaMap
+  ): Map<NodeId, ForgeGraphNode> {
+    const sortedGraph = new Map<NodeId, ForgeGraphNode>(graph);
+
+    approvedDelta.mutations.forEach(mutation => {
+      const node = sortedGraph.get(mutation.nodeId);
+      if (node) {
+        if (mutation.targetField === 'metadata.startDate') {
+          node.payload.metadata.startDate = new Date(mutation.proposedValue);
+        } else if (mutation.targetField === 'metadata.endDate') {
+          node.payload.metadata.endDate = new Date(mutation.proposedValue);
+        }
+        node.version += 1;
+        node.status = 'STABLE';
+      }
+    });
+
+    const events = Array.from(sortedGraph.values())
+      .filter(n => n.category === ForgeNodeCategory.CALENDAR_EVENT && n.payload.metadata.startDate)
+      .sort((a, b) => a.payload.metadata.startDate!.getTime() - b.payload.metadata.startDate!.getTime());
+
+    for (let i = 0; i < events.length - 1; i++) {
+      const currentEvent = events[i];
+      const nextEvent = events[i + 1];
+      
+      const currentEnd = currentEvent.payload.metadata.endDate || 
+        new Date(currentEvent.payload.metadata.startDate!.getTime() + (currentEvent.payload.metadata.durationHours || 1) * 60 * 60 * 1000);
+
+      if (currentEnd.getTime() > nextEvent.payload.metadata.startDate!.getTime()) {
+        const overlapDuration = currentEnd.getTime() - nextEvent.payload.metadata.startDate!.getTime();
+        nextEvent.payload.metadata.startDate = new Date(nextEvent.payload.metadata.startDate!.getTime() + overlapDuration);
+        if (nextEvent.payload.metadata.endDate) {
+          nextEvent.payload.metadata.endDate = new Date(nextEvent.payload.metadata.endDate.getTime() + overlapDuration);
+        }
+        nextEvent.status = 'STABLE';
+        nextEvent.version += 1;
+      }
+    }
+
+    return sortedGraph;
+  }
+}
+SECTION 4: PARALLEL EXECUTION PROTOCOL & DEPLOYMENT PIPELINE
+You must collapse traditional sequential build processes. Execute Phase 1 and Phase 2 immediately and concurrently.
+
+PHASE 1 (ADAPTER LAYER) & PHASE 2 (SANDBOX & SEMANTIC PIPELINE) - RUN SIMULTANEOUSLY:
+Direct System Scan: Execute terminal/file-reading checks to index your active schema interfaces, repository state wrappers, and Firestore setup.
+
+Deploy Graph Adapters: Write an infrastructure layer that seamlessly wraps existing models, binding document nodes and TipTap string collections directly into the robust ForgeGraphNode topology without mutating structural production schemas.
+
+Deploy In-Memory Sandbox Utilities: Write full concrete logic for ForgeSyncCompiler.generateImpactReport.
+
+Wire the LLM Integration Layer: Set up API pathways inside evaluateSemanticReactivity to proxy raw text data out to embedding endpoints and validation engines, formatting structural back-references when workspace consistency drifts.
+
+PHASE 3 - TEMPO SORTING AUTOMATION:
+Construct the absolute operational engine for the TempoEngine module.
+
+Ensure that once a client execution token confirms a simulated delta roadmap, the calendar pipeline cascades downstream properties, programmatically compacting calendar layouts and resolving multi-booking errors.
+
+PHASE 4 - OPERATIONAL INVARIANT ASSERTER UI ENGINE:
+Write runtime predicate configurations allowing users to build saved invariant arrays dynamically (e.g., configuring total effort threshold checks or timeline dependency buffers).
+
+Wire these invariants directly into the pre-merge verification pipeline, ensuring any user-driven scenario passes structural testing workflows cleanly before persistence layers update.
