@@ -8,39 +8,43 @@
  *     Authorization: Bearer $GROQ_API_KEY
  *     Content-Type:  application/json
  *
- *   Body (per Groq's spec):
+ *   Body:
  *     {
  *       model:                  string,             // REQUIRED
  *       messages:               ChatMessage[],      // REQUIRED
- *       max_completion_tokens?: number,             // preferred over deprecated `max_tokens`
+ *       max_completion_tokens?: number,
  *       temperature?:           number,
  *       top_p?:                 number,
- *       stream?:                boolean,
- *       response_format?:       { type: "json_object" } | { type: "json_schema", json_schema: ... }
+ *       response_format?:       { type: "json_object" } | { type: "json_schema", json_schema: ... },
+ *       tools?:                 ToolDefinition[],   // function calling
+ *       tool_choice?:           "auto" | "none" | "required" | { type: "function", function: { name } }
  *     }
  *
- *   Response:
+ *   Tool-call response shape:
  *     {
- *       id, object, created, model,
- *       choices: [{ index, message: { role, content }, finish_reason }],
- *       usage:   { prompt_tokens, completion_tokens, total_tokens }
+ *       choices: [{
+ *         message: {
+ *           role: "assistant",
+ *           content: null,                            // null when tools are invoked
+ *           tool_calls: [{
+ *             id:       "call_abc",
+ *             type:     "function",
+ *             function: { name: "...", arguments: "<JSON string>" }
+ *           }]
+ *         },
+ *         finish_reason: "tool_calls"
+ *       }]
  *     }
  *
- * Env:
- *   GROQ_API_KEY            (required)
- *   GROQ_MODEL              (optional override)
+ *   On the next turn the caller appends:
+ *     { role: "assistant", content: "", tool_calls: [...] }       // echo the assistant's call
+ *     { role: "tool", tool_call_id: "call_abc", content: "<json>" } // one per call
  *
  * Models:
- *   • DEFAULT_MODEL = llama-3.3-70b-versatile  — user-visible chat + scans
- *   • FAST_MODEL    = llama-3.1-8b-instant     — tight loops / classification
+ *   • DEFAULT_MODEL = llama-3.3-70b-versatile  — chat + tool-call agents
+ *   • FAST_MODEL    = llama-3.1-8b-instant     — short classification calls
  *
- * Server-only — never import from `"use client"`.
- *
- * Logging:
- *   Every request prints a single line summarizing model, message
- *   count, prompt-char count, and response token usage on success
- *   (or the upstream error body on failure). Lets you watch the
- *   Groq console light up in real time during dev.
+ * Server-only.
  */
 
 import "server-only";
@@ -50,29 +54,78 @@ export const FAST_MODEL = "llama-3.1-8b-instant";
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    /** Arguments are a JSON-encoded string per the OpenAI spec. */
+    arguments: string;
+  };
+}
 
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  /** Null/empty when the assistant turn is purely tool_calls. */
+  content?: string | null;
+  /** Set on assistant turns that issued one or more tool calls. */
+  tool_calls?: ToolCall[];
+  /** Set on `role: "tool"` turns. Echoes the call's `id`. */
+  tool_call_id?: string;
+  /** Optional friendly name for the tool message (some routers use it). */
+  name?: string;
 }
+
+/* ─────────────────────── tool definitions ─────────────────────── */
+
+/** A JSON-Schema-ish parameter spec — what Groq expects under
+ * `tools[].function.parameters`. Kept loose so feature modules can
+ * declare their own schemas without dragging in a Zod-style runtime. */
+export interface ToolParameterSchema {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: ToolParameterSchema;
+  };
+}
+
+export type ToolChoice =
+  | "auto"
+  | "none"
+  | "required"
+  | { type: "function"; function: { name: string } };
+
+/* ─────────────────────── request / result ─────────────────────── */
 
 export interface GroqRequest {
   model?: string;
   messages: ChatMessage[];
   system?: string;
-  /** Legacy alias. If both are set, `maxCompletionTokens` wins. */
   maxTokens?: number;
   maxCompletionTokens?: number;
   temperature?: number;
   topP?: number;
   jsonResponse?: boolean;
+  tools?: ToolDefinition[];
+  toolChoice?: ToolChoice;
   timeoutMs?: number;
 }
 
 export interface GroqResult {
+  /** Empty string when the turn was purely tool calls. */
   content: string;
-  /** OpenAI / Groq finish_reason: "stop" | "length" | "tool_calls" | "content_filter". */
+  /** Populated when the model decided to invoke one or more tools. */
+  toolCalls: ToolCall[];
   stopReason: string;
   tokenUsage: { input: number; output: number; total: number };
   model: string;
@@ -84,7 +137,11 @@ interface ChatCompletionResponse {
   model?: string;
   choices?: Array<{
     index?: number;
-    message?: { role?: string; content?: string };
+    message?: {
+      role?: string;
+      content?: string | null;
+      tool_calls?: ToolCall[];
+    };
     finish_reason?: string;
   }>;
   usage?: {
@@ -95,11 +152,7 @@ interface ChatCompletionResponse {
 }
 
 interface ChatCompletionError {
-  error?: {
-    message?: string;
-    type?: string;
-    code?: string;
-  };
+  error?: { message?: string; type?: string; code?: string };
 }
 
 export class GroqApiError extends Error {
@@ -113,11 +166,8 @@ export class GroqApiError extends Error {
   }
 }
 
-/**
- * Single-shot chat completion. Always calls Groq when invoked — no
- * gating on prompt length / nothing-to-do shortcuts. Callers are
- * responsible for not invoking with an empty prompt.
- */
+/* ─────────────────────── core call ─────────────────────── */
+
 export async function groqChat(req: GroqRequest): Promise<GroqResult> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -127,9 +177,7 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
     );
   }
   const trimmedKey = apiKey.trim();
-  if (trimmedKey.length === 0) {
-    throw new GroqApiError("GROQ_API_KEY is empty after trim.", 0);
-  }
+  if (!trimmedKey) throw new GroqApiError("GROQ_API_KEY is empty after trim.", 0);
 
   const model = req.model ?? process.env.GROQ_MODEL ?? DEFAULT_MODEL;
   const messages: ChatMessage[] = [];
@@ -142,7 +190,10 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
 
   const maxTokens = req.maxCompletionTokens ?? req.maxTokens ?? 1024;
   const temperature = req.temperature ?? 0.4;
-  const promptChars = messages.reduce((n, m) => n + m.content.length, 0);
+  const promptChars = messages.reduce(
+    (n, m) => n + (typeof m.content === "string" ? m.content.length : 0),
+    0,
+  );
 
   const controller = new AbortController();
   const timeout = setTimeout(
@@ -154,19 +205,20 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
 
   const body: Record<string, unknown> = {
     model,
-    messages,
-    // `max_completion_tokens` is the Groq-preferred name. We also
-    // emit `max_tokens` for compatibility with older client cuts of
-    // the OpenAI spec — Groq treats them as equivalent.
+    messages: messages.map(serializeMessage),
     max_completion_tokens: maxTokens,
     max_tokens: maxTokens,
     temperature,
   };
   if (typeof req.topP === "number") body.top_p = req.topP;
   if (req.jsonResponse) body.response_format = { type: "json_object" };
+  if (req.tools && req.tools.length > 0) {
+    body.tools = req.tools;
+    body.tool_choice = req.toolChoice ?? "auto";
+  }
 
   console.log(
-    `[groq] → POST ${ENDPOINT} model=${model} messages=${messages.length} promptChars=${promptChars} maxCompletionTokens=${maxTokens} json=${req.jsonResponse ? "yes" : "no"}`,
+    `[groq] → POST ${ENDPOINT} model=${model} messages=${messages.length} promptChars=${promptChars} maxCompletionTokens=${maxTokens} tools=${req.tools?.length ?? 0} json=${req.jsonResponse ? "yes" : "no"}`,
   );
 
   try {
@@ -203,14 +255,16 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
     const data = (await res.json()) as ChatCompletionResponse;
     const choice = data.choices?.[0];
     const content = choice?.message?.content ?? "";
+    const toolCalls = choice?.message?.tool_calls ?? [];
     const usage = data.usage ?? {};
 
     console.log(
-      `[groq] ✓ ${res.status} in ${durationMs}ms model=${data.model ?? model} tokens=in:${usage.prompt_tokens ?? 0}/out:${usage.completion_tokens ?? 0}/total:${usage.total_tokens ?? 0} contentChars=${content.length} stop=${choice?.finish_reason ?? "stop"}`,
+      `[groq] ✓ ${res.status} in ${durationMs}ms model=${data.model ?? model} tokens=in:${usage.prompt_tokens ?? 0}/out:${usage.completion_tokens ?? 0}/total:${usage.total_tokens ?? 0} contentChars=${(content ?? "").length} toolCalls=${toolCalls.length} stop=${choice?.finish_reason ?? "stop"}`,
     );
 
     return {
-      content,
+      content: content ?? "",
+      toolCalls,
       stopReason: choice?.finish_reason ?? "stop",
       tokenUsage: {
         input: usage.prompt_tokens ?? 0,
@@ -225,10 +279,36 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
     const msg = err instanceof Error ? err.message : "unknown";
     console.error(`[groq] ✗ transport error in ${Date.now() - t0}ms — ${msg}`);
     if (err instanceof Error && err.name === "AbortError") {
-      throw new GroqApiError(`Groq request timed out after ${req.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`, 0);
+      throw new GroqApiError(
+        `Groq request timed out after ${req.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`,
+        0,
+      );
     }
     throw new GroqApiError(`Groq transport error: ${msg}`, 0);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Normalise a ChatMessage to the exact wire shape Groq expects. The
+ * OpenAI spec requires `content` to be a string (or null when
+ * `tool_calls` is set), and `tool_call_id` only on `role: "tool"`
+ * turns. We strip undefined keys so the JSON stays minimal.
+ */
+function serializeMessage(m: ChatMessage): Record<string, unknown> {
+  const out: Record<string, unknown> = { role: m.role };
+  if (m.role === "tool") {
+    out.tool_call_id = m.tool_call_id;
+    out.content = m.content ?? "";
+    if (m.name) out.name = m.name;
+    return out;
+  }
+  if (m.tool_calls && m.tool_calls.length > 0) {
+    out.tool_calls = m.tool_calls;
+    out.content = m.content ?? "";
+    return out;
+  }
+  out.content = m.content ?? "";
+  return out;
 }

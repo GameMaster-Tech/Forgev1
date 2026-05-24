@@ -43,18 +43,32 @@ interface ExplainBody {
 interface RationaleOut {
   id: string;
   sentence: string;
+  factors: Array<{ label: string; weight: number }>;
+  confidence: "high" | "medium" | "low";
 }
 
-const SYSTEM_PROMPT = `You are Tempo's planning explainer. For each scheduled item the user sends you, return ONE short sentence (≤ 20 words) that tells them WHY Tempo placed it where it did.
+const SYSTEM_PROMPT = `You are Tempo's planning explainer. For each scheduled item, return a one-line rationale AND a structured set of contributing factors so the UI can render them as chips.
 
-Rules:
-- Use plain English. No jargon. No commas-on-commas.
+Rules per item:
+- Sentence: ≤ 20 words, plain English, second-person where natural ("you have a hard deadline…").
 - Reference 1–2 of the most-relevant priority factors only.
-- Speak in second person when natural ("because you have…").
-- NEVER mention "the algorithm", "the model", "AI", or "Tempo's heuristics" — just describe the reason.
+- NEVER mention "algorithm", "model", "AI", or "heuristics" — describe the reason in human terms.
+- Factors array: pick the 1–3 strongest signals from the input \`factors\` and re-emit each with a short \`label\` (3–4 words) and a normalized \`weight\` in [0, 1] reflecting how much that factor drove placement.
+- Confidence: how confident you are the placement is right ("high" | "medium" | "low").
 
 Respond with STRICT JSON only:
-{ "rationales": [ { "id": "<input id>", "sentence": "<one short sentence>" } ] }`;
+{
+  "rationales": [
+    {
+      "id": "<input id>",
+      "sentence": "<one short sentence>",
+      "factors": [
+        { "label": "<short label>", "weight": <number 0-1> }
+      ],
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
+}`;
 
 export async function POST(request: Request) {
   const auth = await requireUser(request);
@@ -141,7 +155,13 @@ function parseRationales(raw: string, ids: string[]): RationaleOut[] {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "")
     .trim();
-  let parsed: { rationales?: { id?: unknown; sentence?: unknown }[] };
+  interface RawR {
+    id?: unknown;
+    sentence?: unknown;
+    factors?: unknown;
+    confidence?: unknown;
+  }
+  let parsed: { rationales?: RawR[] };
   try {
     parsed = JSON.parse(cleaned);
   } catch {
@@ -154,7 +174,23 @@ function parseRationales(raw: string, ids: string[]): RationaleOut[] {
     const id = typeof r.id === "string" ? r.id : "";
     const sentence = typeof r.sentence === "string" ? r.sentence.trim() : "";
     if (!id || !sentence || !idSet.has(id)) continue;
-    out.push({ id, sentence: sentence.slice(0, 240) });
+    const factors = Array.isArray(r.factors)
+      ? r.factors
+          .slice(0, 3)
+          .map((f) => f as { label?: unknown; weight?: unknown })
+          .filter((f): f is { label: string; weight: number } =>
+            typeof f.label === "string" && typeof f.weight === "number",
+          )
+          .map((f) => ({
+            label: f.label.slice(0, 40),
+            weight: Math.max(0, Math.min(1, f.weight)),
+          }))
+      : [];
+    const confidence: RationaleOut["confidence"] =
+      r.confidence === "low" || r.confidence === "medium" || r.confidence === "high"
+        ? r.confidence
+        : "medium";
+    out.push({ id, sentence: sentence.slice(0, 240), factors, confidence });
   }
   return out;
 }
