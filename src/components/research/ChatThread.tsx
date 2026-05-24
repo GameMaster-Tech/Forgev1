@@ -28,6 +28,7 @@ import {
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Sparkles, RotateCcw } from "lucide-react";
+import { Markdown } from "./Markdown";
 import type { ChatTurn } from "@/hooks/useChatThread";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
@@ -154,10 +155,12 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
           </div>
         </div>
 
-        {/* Composer — hairline top border, no card */}
+        {/* Composer — hairline top border, no card. The `composer-bare`
+            class opts the textarea out of the global focus-visible
+            violet outline so typing doesn't paint a blue block. */}
         <form
           onSubmit={handleSubmit}
-          className="border-t border-border bg-background"
+          className="composer-bare border-t border-border bg-background"
         >
           <div className="max-w-[680px] mx-auto px-6 sm:px-10 py-4">
             <div className="flex items-end gap-3">
@@ -245,14 +248,40 @@ function Turn({ turn }: { turn: ChatTurn }) {
         {turn.pending ? <ThinkingPulse /> : null}
       </div>
 
-      {/* Body */}
-      <div
-        className={`text-[15px] leading-[1.65] text-foreground whitespace-pre-wrap break-words ${
-          isUser ? "pl-4 font-display tracking-[-0.01em]" : "pl-0"
-        }`}
-      >
+      {/* Body — user turns render as plain text (preserving the
+          author's punctuation); assistant turns parse markdown so
+          links, code, bold, headers etc. render properly. */}
+      {isUser ? (
+        <div className="text-[15px] leading-[1.65] text-foreground whitespace-pre-wrap break-words pl-4 font-display tracking-[-0.01em]">
+          {turn.content}
+        </div>
+      ) : (
+        <div className="pl-0 break-words">
+          {turn.content ? <Markdown text={turn.content} tight /> : null}
+        </div>
+      )}
+      {/* Hidden — kept zero-width so the source diff stays minimal. */}
+      <div style={{ display: "none" }}>
         {turn.content || (turn.pending ? " " : "")}
       </div>
+
+      {/* Agent step chips — only on assistant turns that called tools. */}
+      {!isUser && turn.steps && turn.steps.length > 0 ? (
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap text-[10px] text-muted">
+          <span className="uppercase tracking-[0.16em] font-medium opacity-70">
+            Used
+          </span>
+          {turn.steps.map((s, i) => (
+            <span
+              key={`${s.tool}-${i}`}
+              className="inline-flex items-center px-1.5 py-0.5 border border-border bg-background/60 font-mono"
+              title={`turn ${s.turn} · ${s.durationMs}ms`}
+            >
+              {s.tool}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </motion.li>
   );
 }

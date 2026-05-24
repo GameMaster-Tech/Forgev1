@@ -36,6 +36,8 @@ export interface ChatTurn {
   createdAt: number;
   /** Set while the assistant turn is in flight. */
   pending?: boolean;
+  /** Tools the agent invoked while producing this turn (assistant only). */
+  steps?: Array<{ turn: number; tool: string; durationMs: number }>;
 }
 
 export interface UseChatThreadOptions {
@@ -239,6 +241,7 @@ export function useChatThread({
           headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({
             projectName,
+            projectId,
             history,
             userMessage: trimmed,
           }),
@@ -255,8 +258,10 @@ export function useChatThread({
         }
         const data = (await res.json()) as {
           content?: string;
+          steps?: Array<{ turn: number; tool: string; durationMs: number }>;
         };
         const reply = (data.content ?? "").trim();
+        const stepsForTurn = Array.isArray(data.steps) ? data.steps : undefined;
 
         const persistedAssistantId = await appendMessage(convoId, {
           userId: user.uid,
@@ -273,6 +278,7 @@ export function useChatThread({
                   id: persistedAssistantId,
                   content: reply,
                   pending: false,
+                  steps: stepsForTurn,
                 }
               : m,
           ),

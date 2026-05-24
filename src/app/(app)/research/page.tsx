@@ -11,6 +11,7 @@
 
 import { motion } from "framer-motion";
 import { useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChatThread, type ChatThreadHandle } from "@/components/research/ChatThread";
 import { useChatThread } from "@/hooks/useChatThread";
 import { useActiveProject } from "@/hooks/useActiveProject";
@@ -26,9 +27,15 @@ export default function ResearchPage() {
     [projects, projectId],
   );
 
+  // `?c=<conversationId>` jumps straight back into a thread —
+  // used by the sidebar's "Recent chats" buttons.
+  const search = useSearchParams();
+  const initialConversationId = search?.get("c") ?? null;
+
   const thread = useChatThread({
     projectId,
     projectName,
+    initialConversationId,
   });
 
   const threadRef = useRef<ChatThreadHandle | null>(null);

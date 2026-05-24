@@ -920,11 +920,17 @@ html {
  * mouse-focusable inputs; for keyboard navigation we render a high-
  * contrast violet ring at 2px so it passes WCAG AA on every surface.
  *
- * Excluded: the TipTap editor surface and any contenteditable target.
- * The blue/violet outline around a typing cursor reads as a glitch,
- * not an affordance — the caret colour already signals focus there.
+ * Excluded:
+ *   • The TipTap editor surface and any contenteditable — the caret
+ *     colour already signals focus there.
+ *   • Anything inside a `.composer-bare` ancestor — the research
+ *     chat composer is a borderless textarea whose surrounding form
+ *     handles affordances. The outline reads as a stray blue/violet
+ *     block on every keystroke.
+ *   • Anything marked `data-no-focus-ring="true"` — explicit opt-out
+ *     for any input where a ring would be visual noise.
  */
-*:focus-visible:not(.ProseMirror):not([contenteditable="true"]):not([contenteditable="true"] *) {
+*:focus-visible:not(.ProseMirror):not([contenteditable="true"]):not([contenteditable="true"] *):not(.composer-bare *):not([data-no-focus-ring="true"]) {
   outline: 2px solid var(--violet);
   outline-offset: 2px;
 }
@@ -933,7 +939,11 @@ html {
 .ProseMirror:focus,
 .ProseMirror:focus-visible,
 [contenteditable="true"]:focus,
-[contenteditable="true"]:focus-visible {
+[contenteditable="true"]:focus-visible,
+.composer-bare *:focus,
+.composer-bare *:focus-visible,
+[data-no-focus-ring="true"]:focus,
+[data-no-focus-ring="true"]:focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }
