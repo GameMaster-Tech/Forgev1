@@ -25,7 +25,11 @@ import { GoogleApiError } from "@/lib/server/google-api";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 540;   // seconds, for Vercel hobby/pro caps
+// Vercel Hobby caps Serverless Functions at 300s. Pro/Enterprise
+// can take up to 900s — bump this back to 540 (or 900) once we
+// upgrade the plan. The cron loops over users with per-user time
+// budgets, so 300s comfortably handles ~50 accounts per tick.
+export const maxDuration = 300;
 
 interface UserResult {
   uid: string;
