@@ -11,6 +11,10 @@ import { CursorOverlay } from "@/components/collab/CursorOverlay";
 import { usePresence } from "@/hooks/usePresence";
 import { Tutorial } from "@/components/onboarding/Tutorial";
 import { useGlobalCommands } from "@/hooks/useGlobalCommands";
+import { EchoTray } from "@/components/echo/EchoTray";
+import { EchoBell } from "@/components/echo/EchoBell";
+import { useEchoStore } from "@/store/echo";
+import { useAuth } from "@/context/AuthContext";
 
 /**
  * AppShell — floating dark sidebar on desktop, bottom bar on mobile.
@@ -26,11 +30,16 @@ import { useGlobalCommands } from "@/hooks/useGlobalCommands";
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showNewProject, setShowNewProject] = useState(false);
+  const { user } = useAuth();
   // Global "personal" doc id so PresenceStrip is always live. Each
   // page can mount its own useCollab for a feature-scoped doc.
   const { peers } = usePresence({ kind: "lattice-tree", projectId: "personal", resourceId: "shell" });
   // Register the global Cmd-K command set (nav + create + projects).
   useGlobalCommands({ onNewProject: () => setShowNewProject(true) });
+  // Echo — proactive tension surface. Tray is rendered once globally;
+  // EchoBell anywhere in the tree opens it via the shared store.
+  const echoIsOpen = useEchoStore((s) => s.isOpen);
+  const closeEcho = useEchoStore((s) => s.close);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
@@ -53,6 +62,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           surface inside MobileBottomNav (TBD). */}
       <div className="hidden md:flex fixed top-4 right-4 z-40 items-center gap-2">
         <PresenceStrip peers={peers} />
+        <EchoBell variant="inline" />
         <NotificationBell />
       </div>
       {/* Remote screen cursors (Lattice / Sync / Calendar surfaces). */}
@@ -64,6 +74,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       />
       <CommandPalette />
       <Tutorial />
+      {/* Echo — rendered once globally so any EchoBell anywhere can
+          drive it via the shared store. */}
+      <EchoTray uid={user?.uid ?? null} open={echoIsOpen} onClose={closeEcho} />
     </div>
   );
 }

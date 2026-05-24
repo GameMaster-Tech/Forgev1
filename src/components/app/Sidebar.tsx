@@ -57,6 +57,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import { replayTutorial } from "@/components/onboarding/Tutorial";
 import { useRecentChats } from "@/hooks/useRecentChats";
+import { EchoBell } from "@/components/echo/EchoBell";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 const COLLAPSED_W = 56;
@@ -517,6 +518,13 @@ export default function Sidebar({
             <Compass size={14} />
             {!expanded ? <RailTooltip label="Tour Forge" /> : null}
           </button>
+
+          {/* Echo — opens the tension tray. Pulses when there's an
+              unseen high-severity notice. */}
+          <EchoBell
+            variant="rail"
+            className={expanded ? "w-8 h-8" : "w-full h-9"}
+          />
 
           <button
             onClick={() => logout()}

@@ -293,6 +293,16 @@
     },
 
     {
+      "_comment": "Echo — active notices per user, ordered most-recent first. The client filters snoozed records in-memory after this query. Path is a subcollection so this index applies at the collection-group level too.",
+      "collectionGroup": "echo_notices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dismissedAt", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    {
       "_comment": "Veritas — episodes chronological.",
       "collectionGroup": "veritasEpisodes",
       "queryScope": "COLLECTION",

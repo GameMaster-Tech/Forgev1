@@ -56,6 +56,37 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Echo — proactive tension surface.
+      //
+      //   /users/{uid}/echo_meta/state          — singleton with
+      //                                           lastScannedAt + totals.
+      //                                           Server-write only.
+      //   /users/{uid}/echo_notices/{signalHash}— one row per surfaced
+      //                                           tension. Created by
+      //                                           the server scan; the
+      //                                           user can dismiss /
+      //                                           snooze / mark-done by
+      //                                           updating their own
+      //                                           row.
+      //
+      // Updates from the client are gated so the user can ONLY touch
+      // the action fields — they can't rewrite the title, body, or
+      // signalHash. This keeps the dedup contract safe.
+      match /echo_meta/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+      match /echo_notices/{noticeId} {
+        allow read:   if request.auth != null && request.auth.uid == userId;
+        allow create: if false; // server-only
+        allow update: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.diff(resource.data)
+                          .affectedKeys()
+                          .hasOnly(['seen', 'snoozedUntil', 'dismissedAt', 'resolvedAs']);
+        allow delete: if false;
+      }
+
       // Integrations subtree — Google Calendar (refresh tokens
       // encrypted at rest; access tokens short-lived). Server-only
       // writes via the admin SDK; clients can read for status surfacing.
