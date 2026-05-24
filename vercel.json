@@ -1,0 +1,37 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/echo/scan/route.ts":              { "maxDuration": 60,  "memory": 1024 },
+    "src/app/api/integrations/notion/sync/route.ts": { "maxDuration": 300, "memory": 1024 },
+    "src/app/api/integrations/google/sync/route.ts": { "maxDuration": 300, "memory": 1024 },
+    "src/app/api/tempo/agent/route.ts":            { "maxDuration": 120, "memory": 1024 },
+    "src/app/api/research/chat/route.ts":          { "maxDuration": 120, "memory": 1024 },
+    "src/app/api/pulse/freshness-scan/route.ts":   { "maxDuration": 30,  "memory": 1024 },
+    "src/app/api/forge-graph/project-contradictions/route.ts": { "maxDuration": 30, "memory": 1024 },
+    "src/app/api/pulse/refactor/draft/route.ts":   { "maxDuration": 30,  "memory": 1024 },
+    "src/app/api/forge-graph/contradiction-scan/route.ts": { "maxDuration": 30, "memory": 1024 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/gcal-sync",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/gcal-renew-watch",
+      "schedule": "0 3 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" }
+      ]
+    }
+  ]
+}
