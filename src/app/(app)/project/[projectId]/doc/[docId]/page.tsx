@@ -34,12 +34,10 @@ import ForgeEditor, {
 import ResearchSidePanel from "@/components/editor/ResearchSidePanel";
 import ClaimCheckPanel from "@/components/editor/ClaimCheckPanel";
 import { ShareLinkButton } from "@/components/editor/ShareLinkButton";
-import { ContradictionBanner } from "@/components/editor/ContradictionBanner";
-import { useDocContradictions } from "@/hooks/useDocContradictions";
 import { CommentsPanel } from "@/components/editor/CommentsPanel";
 import { useDocComments } from "@/hooks/useDocComments";
 import type { Editor } from "@tiptap/react";
-import { MessageSquare, AlertTriangle } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -94,21 +92,10 @@ export default function EditorPage({
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
 
-  // On-demand intra-document contradiction scan via Groq. Fires only
-  // when the user clicks "Check" — never on debounce — so we don't
-  // bill Groq on every keystroke.
-  const {
-    contradictions,
-    scanning,
-    lastScanAt,
-    staleSinceLastScan,
-    rescan: rescanContradictions,
-  } = useDocContradictions({ editor });
-  const hasScanned = lastScanAt != null;
-
-  const handleJumpToContradiction = useCallback((text: string) => {
-    editorHandleRef.current?.jumpToText(text);
-  }, []);
+  // NOTE: contradiction scanning lives on the /checks page (run from
+  // there, not from inside the editor) — keeps the doc surface focused
+  // on writing and means a scan only ever fires when the user
+  // explicitly asks for one.
 
   // ── Comments ─────────────────────────────────────────────────
   const commentsApi = useDocComments(docId);
@@ -406,19 +393,6 @@ export default function EditorPage({
               <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-warm rounded-full" />
             ) : null}
           </button>
-          {/* Check for contradictions — on-demand AI call */}
-          <button
-            type="button"
-            onClick={() => void rescanContradictions()}
-            disabled={scanning}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.15em] font-bold border text-warm border-warm/30 hover:bg-warm/[0.08] disabled:opacity-50 transition-all"
-            title="Scan this document for contradicting statements"
-          >
-            <AlertTriangle size={11} />
-            <span className="hidden md:inline">
-              {scanning ? "Checking…" : "Check"}
-            </span>
-          </button>
           <ShareLinkButton documentId={docId} />
           <button
             type="button"
@@ -527,21 +501,6 @@ export default function EditorPage({
               className="w-full bg-transparent font-display text-[clamp(2rem,4.5vw,2.75rem)] text-foreground placeholder:text-muted/30 focus:outline-none tracking-[-0.03em] leading-[1.05]"
             />
           </motion.div>
-
-          {/* Contradiction banner — only renders after the user clicks
-              "Check" (the call into Groq is strictly on-demand). */}
-          {scanning || hasScanned ? (
-            <div className="mb-4">
-              <ContradictionBanner
-                contradictions={contradictions}
-                scanning={scanning}
-                staleSinceLastScan={staleSinceLastScan}
-                hasScanned={hasScanned}
-                onJump={handleJumpToContradiction}
-                onRescan={() => void rescanContradictions()}
-              />
-            </div>
-          ) : null}
 
           <ForgeEditor
             content={editorHtml}

@@ -117,8 +117,10 @@ export async function runBidirectionalSync(args: {
     pageToken = page.nextPageToken;
   } while (pageToken);
 
-  // 2. Fetch local events.
-  const eventsCol = fs.collection(`users/${args.uid}/calendar/events`);
+  // 2. Fetch local events. Path is 3 segments — `users/{uid}/google_events`
+  //    is a top-level subcollection. (An older path `users/{uid}/calendar/events`
+  //    was 4 segments, which Firestore rejects as a document, not a collection.)
+  const eventsCol = fs.collection(`users/${args.uid}/google_events`);
   const localQuery = await eventsCol
     .where("start", ">=", args.rangeStart)
     .where("start", "<=", args.rangeEnd)

@@ -37,7 +37,9 @@ import {
   CalendarPlus,
   FolderPlus,
   Sparkles,
+  Compass,
 } from "lucide-react";
+import { replayTutorial } from "@/components/onboarding/Tutorial";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -270,6 +272,16 @@ export default function Sidebar({
         >
           {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
           <RailTooltip label={theme === "dark" ? "Light mode" : "Dark mode"} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => replayTutorial()}
+          aria-label="Replay tutorial"
+          className="group relative flex items-center justify-center w-full h-9 text-background/55 hover:text-background hover:bg-white/[0.05] transition-colors duration-150"
+        >
+          <Compass size={14} />
+          <RailTooltip label="Tour Forge" />
         </button>
 
         <button

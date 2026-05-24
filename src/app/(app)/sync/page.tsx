@@ -13,17 +13,19 @@
  */
 
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
   CheckCircle2,
   AlertTriangle,
   Lock,
+  Loader2,
   ShieldCheck,
   Sparkles,
   GitBranch,
 } from "lucide-react";
 import type { Assertion, Violation } from "@/lib/sync";
+import type { ProjectContradiction } from "@/hooks/useProjectContradictions";
 import { useSync } from "./SyncProvider";
 import { ease } from "./_components";
 
@@ -37,6 +39,10 @@ export default function SyncOverviewPage() {
     documentsCount,
     hasPatch,
     patchChanges,
+    aiContradictions,
+    aiScanning,
+    aiLastScanAt,
+    aiError,
   } = useSync();
 
   const topConflicts = violations.slice(0, TOP_PREVIEW);
@@ -88,6 +94,16 @@ export default function SyncOverviewPage() {
             <CleanPreview />
           </div>
         )}
+
+        {/* AI cross-doc semantic check — runs on the SAME Compile
+            click as the deterministic solver above. Renders only
+            after the user has hit Compile at least once. */}
+        <AICrossDocSection
+          scanning={aiScanning}
+          contradictions={aiContradictions}
+          lastScanAt={aiLastScanAt}
+          error={aiError}
+        />
       </div>
 
       {/* ── Right rail companion ────────────────────────────── */}
@@ -349,5 +365,147 @@ function ManifestoCard() {
         Deterministic · auditable · reversible
       </div>
     </motion.div>
+  );
+}
+
+/* ── AI cross-doc check ────────────────────────────────────── */
+
+function AICrossDocSection({
+  scanning,
+  contradictions,
+  lastScanAt,
+  error,
+}: {
+  scanning: boolean;
+  contradictions: ProjectContradiction[];
+  lastScanAt: number | null;
+  error: string | null;
+}) {
+  // Pre-compile state — don't crowd the page until the user has run
+  // Compile at least once.
+  if (!scanning && lastScanAt == null && !error) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease }}
+      className="mt-10 pt-6 border-t border-border"
+    >
+      <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium flex items-center gap-2">
+          <Sparkles size={11} strokeWidth={1.75} className="text-violet" />
+          AI cross-doc check
+        </p>
+        <span className="text-[10px] uppercase tracking-[0.12em] text-muted tabular-nums">
+          {scanning
+            ? "running…"
+            : lastScanAt != null
+              ? `checked ${new Date(lastScanAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+              : ""}
+        </span>
+      </div>
+
+      <AnimatePresence mode="wait">
+        {scanning ? (
+          <motion.div
+            key="scanning"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex items-center gap-3 px-4 py-5 border border-border bg-surface text-[12px] text-muted"
+          >
+            <Loader2 size={14} className="text-violet animate-spin" />
+            Reading every doc and comparing claims…
+          </motion.div>
+        ) : error ? (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="px-4 py-4 border border-rose/30 bg-rose/[0.04] text-[12px] text-rose"
+          >
+            {error}
+          </motion.div>
+        ) : contradictions.length === 0 ? (
+          <motion.div
+            key="clean"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="flex items-start gap-3 px-4 py-4 border border-border bg-surface"
+          >
+            <CheckCircle2 size={14} strokeWidth={2} className="text-green shrink-0 mt-0.5" />
+            <div>
+              <div className="font-display font-bold text-foreground text-[14px] tracking-[-0.014em]">
+                Nothing contradicts.
+              </div>
+              <p className="text-[12px] text-muted mt-0.5 leading-relaxed">
+                Every claim across your docs is internally consistent.
+              </p>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.ul
+            key="list"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border border-border bg-surface divide-y divide-border"
+          >
+            {contradictions.map((c, i) => (
+              <motion.li
+                key={`${c.docAId}_${c.docBId}_${i}`}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, delay: i * 0.04, ease }}
+                className="px-4 py-3.5"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 border border-rose/30 bg-rose/[0.04] flex items-center justify-center shrink-0 mt-0.5">
+                    <AlertTriangle size={11} strokeWidth={2.25} className="text-rose" />
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <AISide label="A" docTitle={c.docATitle} span={c.spanA} />
+                    <AISide label="B" docTitle={c.docBTitle} span={c.spanB} />
+                    {c.reason ? (
+                      <p className="text-[12px] text-foreground/80 leading-relaxed pt-0.5">
+                        <span className="text-[9px] uppercase tracking-[0.16em] font-semibold text-rose mr-2">
+                          Why
+                        </span>
+                        {c.reason}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </motion.li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function AISide({ label, docTitle, span }: { label: string; docTitle: string; span: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[9px] uppercase tracking-[0.16em] font-semibold text-rose shrink-0">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="text-[10px] uppercase tracking-[0.12em] text-muted mr-2">
+          {docTitle}
+        </span>
+        <span className="text-[12.5px] text-foreground/90 leading-snug">
+          &ldquo;{span}&rdquo;
+        </span>
+      </div>
+    </div>
   );
 }

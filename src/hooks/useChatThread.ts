@@ -62,11 +62,22 @@ export interface UseChatThreadApi {
 
 const MAX_HISTORY_FOR_API = 30;
 
+/**
+ * Force-refresh the Firebase ID token before each chat send.
+ *
+ * Why force: `getIdToken()` returns a cached token that may have
+ * expired (>1h) even though the SDK believes the user is logged in.
+ * When the server calls `verifyIdToken(token, true)` with the
+ * checkRevoked flag the stale token fails with "Invalid or expired
+ * token" — exactly the error the user saw. Passing `true` here
+ * triggers a refresh against Google's STS so the server always sees a
+ * fresh token.
+ */
 async function authHeaders(): Promise<Record<string, string>> {
   const user = auth.currentUser;
   if (!user) return {};
   try {
-    const token = await user.getIdToken();
+    const token = await user.getIdToken(true);
     return { Authorization: `Bearer ${token}` };
   } catch {
     return {};

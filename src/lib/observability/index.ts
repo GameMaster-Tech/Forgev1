@@ -24,16 +24,30 @@ import { captureEvent, captureException } from "./sentry";
 export type LogEventKind =
   | "oauth.exchange"
   | "gcal.sync"
+  | "notion.sync"
   | "sync.compile"
   | "pulse.sync"
   | "custom";
 
 export interface OAuthExchangePayload {
-  provider: "google";
+  provider: "google" | "notion";
   status: "ok" | "denied" | "error";
   userId?: string;
   email?: string;
+  workspaceId?: string;
   reason?: string;
+  durationMs?: number;
+}
+
+export interface NotionSyncPayload {
+  userId?: string;
+  scannedPages?: number;
+  scannedDatabases?: number;
+  createdProjects?: number;
+  upsertedDocuments?: number;
+  upsertedEvents?: number;
+  upsertedDataTables?: number;
+  archivedDocuments?: number;
   durationMs?: number;
 }
 
@@ -66,6 +80,7 @@ export interface PulseSyncPayload {
 export type LogEventPayload =
   | { kind: "oauth.exchange"; data: OAuthExchangePayload }
   | { kind: "gcal.sync"; data: GcalSyncPayload }
+  | { kind: "notion.sync"; data: NotionSyncPayload }
   | { kind: "sync.compile"; data: SyncCompilePayload }
   | { kind: "pulse.sync"; data: PulseSyncPayload }
   | { kind: "custom"; data: Record<string, unknown> };

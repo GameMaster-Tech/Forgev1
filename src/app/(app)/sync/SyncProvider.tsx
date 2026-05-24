@@ -49,6 +49,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useActiveProject } from "@/hooks/useActiveProject";
 import { useSyncWorkspace } from "@/hooks/useSyncWorkspace";
 import { applyGraphToFirestore } from "@/lib/firestore/sync";
+import { useProjectContradictions } from "@/hooks/useProjectContradictions";
+import type { ProjectContradiction } from "@/hooks/useProjectContradictions";
 
 export interface SyncCtx {
   /* derived */
@@ -75,6 +77,15 @@ export interface SyncCtx {
   discardPatch: () => void;
   undoLast: () => void;
   resetDemo: () => void;
+  /* AI cross-doc scan — fires on the SAME compile click as the
+     deterministic solver, but uses Groq to find prose-level
+     contradictions across every document in the project. */
+  aiContradictions: ProjectContradiction[];
+  aiScanning: boolean;
+  aiScanCount: number;
+  aiScannedDocs: number;
+  aiLastScanAt: number | null;
+  aiError: string | null;
   /* meta */
   projectId: string;
 }
@@ -115,6 +126,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     [graph],
   );
 
+  // Project-wide AI contradiction scan — shares the Compile button.
+  const aiScan = useProjectContradictions(projectId);
+
   const compile = useCallback(() => {
     setComputing(true);
     setTimeout(() => {
@@ -131,7 +145,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         detail: { reachesStable: next.reachesStableState, iterations: next.iterations },
       });
     }, 350);
-  }, [graph, user?.uid]);
+    // Fire the AI cross-doc scan in parallel — it streams its own
+    // loading state into the overview page, so the deterministic
+    // patch lands first while the model is still reading.
+    void aiScan.scan();
+  }, [graph, user?.uid, aiScan]);
 
   const applyCurrentPatch = useCallback(() => {
     if (!patch) return;
@@ -244,6 +262,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     discardPatch,
     undoLast,
     resetDemo,
+    aiContradictions: aiScan.contradictions,
+    aiScanning: aiScan.scanning,
+    aiScanCount: aiScan.contradictions.length,
+    aiScannedDocs: aiScan.scannedDocs,
+    aiLastScanAt: aiScan.lastScanAt,
+    aiError: aiScan.error,
     projectId: graph.projectId,
   };
 

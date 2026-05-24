@@ -52,6 +52,7 @@ import { useActiveProject } from "@/hooks/useActiveProject";
 import { useSyncWorkspace } from "@/hooks/useSyncWorkspace";
 import { usePulseWorkspace } from "@/hooks/usePulseWorkspace";
 import { upsertBlock } from "@/lib/firestore/pulse";
+import { useFreshnessScan, type FreshnessItem } from "@/hooks/useFreshnessScan";
 
 export interface PulseCtx {
   /* derived data */
@@ -74,6 +75,14 @@ export interface PulseCtx {
   acceptRefactor: (p: RefactorProposal) => Promise<void>;
   rejectRefactor: (p: RefactorProposal) => Promise<void>;
   skipRefactor: (p: RefactorProposal) => void;
+  /* AI freshness scan — fires on the SAME reality-sync click as the
+     deterministic trust sweep, but uses Groq to flag time-sensitive
+     prose across the whole project. */
+  aiFreshnessItems: FreshnessItem[];
+  aiScanning: boolean;
+  aiScannedDocs: number;
+  aiLastScanAt: number | null;
+  aiError: string | null;
   /* project handle for child callbacks */
   projectId: string;
 }
@@ -125,10 +134,16 @@ export function PulseProvider({ children }: { children: ReactNode }) {
     });
   }, [run]);
 
+  // Project-wide AI freshness scan — shares the reality-sync button.
+  const aiScan = useFreshnessScan(projectId);
+
   const runNow = useCallback(async () => {
     setRunning(true);
     const config: Partial<PulseConfig> = { ...defaultConfig(graph.projectId), cadence };
     const registry = defaultRegistry(2026);
+    // Kick off the AI freshness scan in parallel with the deterministic
+    // trust sweep — both feed the overview, but neither blocks the other.
+    void aiScan.scan();
     const next = await runSync({ assertions, blocks, oracle: registry, config });
     next.refactorProposals = filterRejected(next.refactorProposals, rejections);
     setRun(next);
@@ -142,7 +157,7 @@ export function PulseProvider({ children }: { children: ReactNode }) {
       uid: user?.uid,
       detail: { ...next, diffs: next.diffs.length, refactors: next.refactorProposals.length },
     });
-  }, [graph.projectId, cadence, assertions, blocks, rejections, user?.uid]);
+  }, [graph.projectId, cadence, assertions, blocks, rejections, user?.uid, aiScan]);
 
   // Initial sync on mount + whenever the source blocks change (e.g.
   // after a refactor is accepted and the block body gets replaced).
@@ -295,6 +310,11 @@ export function PulseProvider({ children }: { children: ReactNode }) {
     acceptRefactor,
     rejectRefactor,
     skipRefactor,
+    aiFreshnessItems: aiScan.items,
+    aiScanning: aiScan.scanning,
+    aiScannedDocs: aiScan.scannedDocs,
+    aiLastScanAt: aiScan.lastScanAt,
+    aiError: aiScan.error,
     projectId: graph.projectId,
   };
 

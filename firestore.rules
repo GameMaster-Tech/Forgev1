@@ -34,6 +34,16 @@ service cloud.firestore {
                            && request.auth.uid == userId;
       }
 
+      // Google Calendar mirror — top-level subcollection that the
+      // server sync route writes into and the client `subscribeGoogleEvents`
+      // reads. Must be a 3-segment path; an older 4-segment design
+      // (`users/{uid}/calendar/events`) was rejected by Firestore.
+      // Server writes via admin SDK; client reads its own rows.
+      match /google_events/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+
       // Integrations subtree — Google Calendar (refresh tokens
       // encrypted at rest; access tokens short-lived). Server-only
       // writes via the admin SDK; clients can read for status surfacing.

@@ -3,10 +3,15 @@
  *
  * The server-side `/api/integrations/google/sync` route writes Google
  * events (after bidirectional diff + apply) into
- *   /users/{uid}/calendar/events/{eventId}
+ *   /users/{uid}/google_events/{eventId}
  * as `TimedEvent` rows. The Calendar grid + Tempo expect the
  * lighter-weight `CalendarEvent` shape and read from the project
  * subtree, so without a bridge those events are invisible to the UI.
+ *
+ * NOTE: this is a top-level user subcollection (3 path segments).
+ * The older path `users/{uid}/calendar/events` was 4 segments which
+ * Firestore rejects ("collection references must have an odd number
+ * of segments"). The sync route writes here and we read from here.
  *
  * This module:
  *   • subscribes to the global Google-events collection via
@@ -49,8 +54,9 @@ export function subscribeGoogleEvents(
   onChange: (events: CalendarEvent[]) => void,
   onError?: (err: unknown) => void,
 ): Unsubscribe {
+  // 3-segment path = valid collection. The server sync route writes here.
   return onSnapshot(
-    collection(db, `users/${uid}/calendar/events`),
+    collection(db, "users", uid, "google_events"),
     (snap) => {
       const out: CalendarEvent[] = [];
       for (const d of snap.docs) {
