@@ -38,6 +38,7 @@ import {
 import { useCalendar } from "../CalendarProvider";
 import { ease } from "../_components";
 import { TempoEngineCard } from "@/components/forge-graph/TempoEngineCard";
+import { TempoAgentPanel } from "@/components/calendar/TempoAgentPanel";
 import { useProjectsStore } from "@/store/projects";
 import { useActiveProject } from "@/hooks/useActiveProject";
 import { useAuth } from "@/context/AuthContext";
@@ -87,6 +88,13 @@ export default function CalendarTempoPage() {
           </button>
         </div>
         <TempoVerdict plan={planResult} />
+
+        {/* Groq-powered agent — plan in plain English. Calls the
+            tool-using agent loop, returns a structured diff the user
+            can apply or discard. */}
+        <div className="mt-8">
+          <TempoAgentPanel projectId={activeProjectId} />
+        </div>
 
         {/* Priority queue as a 2-col card grid */}
         <div className="mt-10 pt-6 border-t border-border">

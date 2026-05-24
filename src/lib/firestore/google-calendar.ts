@@ -1,23 +1,25 @@
 /**
- * Google Calendar — client-side Firestore bridge.
+ * External-calendar mirror — client-side Firestore bridge.
  *
- * The server-side `/api/integrations/google/sync` route writes Google
- * events (after bidirectional diff + apply) into
+ * Server-side integrations (Google Calendar + Notion) write their
+ * mirrored events into the same user-scoped collection so the
+ * CalendarProvider only needs one subscription:
+ *
  *   /users/{uid}/google_events/{eventId}
- * as `TimedEvent` rows. The Calendar grid + Tempo expect the
- * lighter-weight `CalendarEvent` shape and read from the project
- * subtree, so without a bridge those events are invisible to the UI.
+ *
+ * Each row is a `TimedEvent` tagged with `externalSource` so the
+ * grid filter and disconnect cleanup can target either source. The
+ * collection name is historical (it predates Notion); we keep it to
+ * avoid a destructive migration.
  *
  * NOTE: this is a top-level user subcollection (3 path segments).
- * The older path `users/{uid}/calendar/events` was 4 segments which
- * Firestore rejects ("collection references must have an odd number
- * of segments"). The sync route writes here and we read from here.
+ * An older 4-segment design (`users/{uid}/calendar/events`) was
+ * rejected by Firestore ("collection references must have an odd
+ * number of segments").
  *
- * This module:
- *   • subscribes to the global Google-events collection via
- *     `onSnapshot`, mapped to `CalendarEvent` with `source: "google"`
- *   • is consumed by `CalendarProvider`, which merges the result
- *     into its `events` state alongside project-scoped events
+ * The function still ships as `subscribeGoogleEvents` for backwards-
+ * compat with every caller; an alias `subscribeMirrorEvents` is
+ * exported for new code that wants the wider name.
  */
 
 import { collection, onSnapshot, type Unsubscribe } from "firebase/firestore";
@@ -25,13 +27,24 @@ import { db } from "@/lib/firebase/config";
 import type { CalendarEvent } from "@/lib/calendar/types";
 import type { TimedEvent } from "@/lib/scheduler/types";
 
+/** Every source we currently mirror into `google_events`. */
+const SURFACED_SOURCES = new Set(["google", "notion"]);
+
 /**
- * Project the scheduler's heavyweight `TimedEvent` row onto the
- * calendar grid's lighter `CalendarEvent` shape. We tag the source
- * so the grid filter ("Google calendar only") and the disconnect
- * cleanup (strip rows where source === "google") work.
+ * Project the scheduler's heavyweight `TimedEvent` onto the
+ * calendar grid's lighter `CalendarEvent`. The `source` field on
+ * the output is normalised to a closed enum the grid understands
+ * ("google" | "notion" | "forge"); the `colorToken` is chosen per
+ * source so the user can tell at a glance where each block came
+ * from.
  */
 function timedToCalendarEvent(t: TimedEvent): CalendarEvent {
+  const source =
+    t.externalSource === "google"
+      ? "google"
+      : t.externalSource === "notion"
+        ? "notion"
+        : "forge";
   return {
     id: t.id,
     projectId: t.projectId,
@@ -41,11 +54,11 @@ function timedToCalendarEvent(t: TimedEvent): CalendarEvent {
     end: t.end,
     allDay: false,
     kind: t.eventKind ?? "meeting",
-    source: t.externalSource === "google" ? "google" : "forge",
+    source,
     externalId: t.externalId,
     location: t.location,
     attendees: t.attendees?.map((a) => ({ name: a.name, email: a.email })),
-    colorToken: "cyan",
+    colorToken: source === "notion" ? "violet" : "cyan",
   };
 }
 
@@ -54,17 +67,16 @@ export function subscribeGoogleEvents(
   onChange: (events: CalendarEvent[]) => void,
   onError?: (err: unknown) => void,
 ): Unsubscribe {
-  // 3-segment path = valid collection. The server sync route writes here.
   return onSnapshot(
     collection(db, "users", uid, "google_events"),
     (snap) => {
       const out: CalendarEvent[] = [];
       for (const d of snap.docs) {
         const data = d.data() as TimedEvent;
-        // Only surface rows that came from Google — local
-        // scheduler-only entries (if any landed here historically)
-        // stay invisible to the grid.
-        if (data.externalSource === "google") {
+        // Surface every mirrored source — currently Google + Notion.
+        // Anything else is internal scheduler bookkeeping that
+        // shouldn't show on the user-facing grid.
+        if (data.externalSource && SURFACED_SOURCES.has(data.externalSource)) {
           out.push(timedToCalendarEvent(data));
         }
       }
@@ -73,3 +85,6 @@ export function subscribeGoogleEvents(
     (err) => onError?.(err),
   );
 }
+
+/** Modern alias — `subscribeGoogleEvents` is kept for back-compat. */
+export const subscribeMirrorEvents = subscribeGoogleEvents;

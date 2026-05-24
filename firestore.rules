@@ -34,14 +34,26 @@ service cloud.firestore {
                            && request.auth.uid == userId;
       }
 
-      // Google Calendar mirror — top-level subcollection that the
-      // server sync route writes into and the client `subscribeGoogleEvents`
-      // reads. Must be a 3-segment path; an older 4-segment design
+      // External-calendar mirror — top-level subcollection that the
+      // server sync routes (Google + Notion) write into and the
+      // client `subscribeGoogleEvents` / `subscribeMirrorEvents` reads.
+      // Must be a 3-segment path; an older 4-segment design
       // (`users/{uid}/calendar/events`) was rejected by Firestore.
-      // Server writes via admin SDK; client reads its own rows.
+      // The collection name is historical — keep it to avoid a
+      // destructive migration; row source is on `externalSource`.
       match /google_events/{document=**} {
         allow read:  if request.auth != null && request.auth.uid == userId;
         allow write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Notion sync state — server writes a mapping row per Notion
+      // page (pageId → forgeProjectId/forgeDocumentId, last edited
+      // time, archived flag) so re-syncs upsert in place. The client
+      // reads its own rows so the settings panel can show progress;
+      // writes are server-only via the admin SDK.
+      match /notion_pages/{document=**} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
       }
 
       // Integrations subtree — Google Calendar (refresh tokens

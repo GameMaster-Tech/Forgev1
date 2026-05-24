@@ -21,11 +21,11 @@ import {
 import type { GoogleIntegrationState } from "@/lib/calendar";
 import { useCalendar } from "../CalendarProvider";
 import { ease } from "../_components";
+import { NotionConnect } from "@/components/integrations/NotionConnect";
 
 const COMING_SOON: { name: string; description: string }[] = [
   { name: "Outlook · Microsoft 365", description: "Microsoft Graph API · two-way sync · OAuth" },
   { name: "iCloud · CalDAV",         description: "Read-only via Apple CalDAV · password-managed" },
-  { name: "Notion Calendar",         description: "Two-way Notion DB sync · property mapping" },
 ];
 
 export default function CalendarIntegrationsPage() {
@@ -46,6 +46,10 @@ export default function CalendarIntegrationsPage() {
           onDisconnect={disconnectGoogle}
           onRefresh={refreshGoogle}
         />
+
+        <div className="mt-6">
+          <NotionConnect />
+        </div>
 
         <div className="mt-10 pt-6 border-t border-border">
           <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">

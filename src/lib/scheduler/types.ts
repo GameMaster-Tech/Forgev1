@@ -141,7 +141,7 @@ export interface TimedEvent extends ScheduleItemBase {
   location?: string;
   attendees?: { name: string; email?: string; rsvp?: "accepted" | "declined" | "tentative" | "needs-action" }[];
   externalId?: string;
-  externalSource?: "google" | "outlook" | "ical";
+  externalSource?: "google" | "outlook" | "ical" | "notion";
   /** Last-modified timestamp from the source. Used for sync diffing. */
   externalEtag?: string;
 }

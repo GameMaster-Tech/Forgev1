@@ -24,7 +24,7 @@ export type EventKind =
   | "patch-review"       // when a proposed patch expires if not actioned
   | "deadline-conflict"; // Sync detected a conflict with this deadline
 
-export type EventSource = "forge" | "google" | "outlook" | "ical";
+export type EventSource = "forge" | "google" | "outlook" | "ical" | "notion";
 
 export interface CalendarEvent {
   id: string;
