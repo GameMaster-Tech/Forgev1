@@ -40,6 +40,14 @@ import {
 import { DEFAULT_MODEL, type ChatMessage } from "@/lib/ai/groq";
 import { runAgent, type AgentEvent } from "@/lib/ai/agent";
 import { buildRegistry } from "@/lib/ai/tools/registry";
+import {
+  checkPromptInjection,
+  enforceDailyAiQuota,
+  logRedactions,
+  peekMonthlyBudget,
+  recordTokensAndCheckBudget,
+  redactPii,
+} from "@/lib/server/llm-guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -97,16 +105,42 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const userMessage = typeof body.userMessage === "string" ? body.userMessage.trim() : "";
-  if (!userMessage) {
+  const rawUserMessage = typeof body.userMessage === "string" ? body.userMessage.trim() : "";
+  if (!rawUserMessage) {
     return NextResponse.json({ error: "userMessage is required" }, { status: 400 });
   }
-  if (userMessage.length > MAX_TURN_CHARS) {
+  if (rawUserMessage.length > MAX_TURN_CHARS) {
     return NextResponse.json(
       { error: `userMessage too long (max ${MAX_TURN_CHARS} chars)` },
       { status: 400 },
     );
   }
+
+  // 1. Cheap pattern-based prompt-injection guard — bail before
+  //    spending a Groq call. Returns a friendly reason; safe to
+  //    surface to the client.
+  const inj = checkPromptInjection(rawUserMessage);
+  if (!inj.ok) {
+    return NextResponse.json({ error: inj.reason ?? "Request blocked." }, { status: 400 });
+  }
+
+  // 2. Per-user daily AI quota — atomic Firestore increment + cap.
+  const quota = await enforceDailyAiQuota(auth.uid);
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.reason ?? "Daily limit reached." }, { status: 429 });
+  }
+
+  // 3. Global monthly budget kill-switch — refuse early if tripped.
+  const budget = await peekMonthlyBudget();
+  if (!budget.ok) {
+    return NextResponse.json({ error: budget.reason ?? "Service paused." }, { status: 503 });
+  }
+
+  // 4. PII redaction — strip emails/phones/SSNs/cards/api-keys from
+  //    the user message before it reaches Groq or any upstream log.
+  const redaction = redactPii(rawUserMessage);
+  logRedactions(`uid=${auth.uid} chat.stream`, redaction.counts);
+  const userMessage = redaction.text;
 
   const historyRaw = Array.isArray(body.history) ? body.history : [];
   const history: { role: "user" | "assistant"; content: string }[] = [];
@@ -147,13 +181,21 @@ export async function POST(request: Request): Promise<Response> {
 
   const registry = buildRegistry({ groups: ["docs:read", "research"] });
 
+  // Redact every history turn too — a prior user turn could still
+  // leak the PII we're trying to keep out of Groq.
   const messages: ChatMessage[] = [
-    ...trimmed.map((t) => ({ role: t.role, content: t.content }) as ChatMessage),
+    ...trimmed.map(
+      (t) =>
+        ({
+          role: t.role,
+          content: redactPii(t.content).text,
+        }) as ChatMessage,
+    ),
     { role: "user", content: userMessage },
   ];
 
   console.log(
-    `[research.chat.stream] ← uid=${auth.uid} project=${projectId ?? "(none)"} historyTurns=${trimmed.length}`,
+    `[research.chat.stream] ← uid=${auth.uid} project=${projectId ?? "(none)"} historyTurns=${trimmed.length} quotaUsed=${quota.used}/${quota.cap}`,
   );
 
   // Build the SSE stream. We pump events as they arrive from the
@@ -189,7 +231,7 @@ export async function POST(request: Request): Promise<Response> {
       }, 10_000);
 
       try {
-        await runAgent({
+        const result = await runAgent({
           system,
           messages,
           registry,
@@ -200,6 +242,10 @@ export async function POST(request: Request): Promise<Response> {
           perCallTimeoutMs: 30_000,
           onEvent: (e) => write(e),
         });
+        // Budget accounting — recorded post-call so partial-stream
+        // costs still count. Fire-and-forget: kill-switch fires on
+        // the NEXT request, not this one.
+        void recordTokensAndCheckBudget(result.tokens.total);
         write({ kind: "done" });
       } catch (err) {
         const message = err instanceof Error ? err.message : "unknown";

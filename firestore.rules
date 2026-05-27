@@ -87,6 +87,16 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // LLM-guard per-user daily quota — server increments via the
+      // admin SDK; client reads its own counter so it can show
+      // "X / 200 today" in the future. Tampering would only let the
+      // user RAISE their own count (lowering would bypass the cap),
+      // so writes are blocked here regardless.
+      match /usage_daily/{day} {
+        allow read:  if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       // Integrations subtree — Google Calendar (refresh tokens
       // encrypted at rest; access tokens short-lived). Server-only
       // writes via the admin SDK; clients can read for status surfacing.

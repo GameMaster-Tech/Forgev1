@@ -328,6 +328,20 @@ export function useChatThread({
               );
               return;
             }
+            if (event.kind === "delta") {
+              // Token-level streaming — append to the assistant turn's
+              // content in place. Markdown re-renders cheaply on each
+              // append; for very long answers we could batch via rAF
+              // but the chars/sec from Groq is comfortable.
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantTurn.id
+                    ? { ...m, content: (m.content ?? "") + event.text }
+                    : m,
+                ),
+              );
+              return;
+            }
             if (event.kind === "tool_done") {
               setMessages((prev) =>
                 prev.map((m) => {

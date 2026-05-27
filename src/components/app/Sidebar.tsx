@@ -435,6 +435,7 @@ export default function Sidebar({
 
       {/* ── Workspace nav ─────────────────── */}
       <nav
+        aria-label="Workspace navigation"
         className={`relative flex-1 ${expanded ? "px-3 pt-3 pb-2 space-y-0.5 overflow-y-auto" : "px-2 pt-1 space-y-0.5"}`}
       >
         {expanded ? (

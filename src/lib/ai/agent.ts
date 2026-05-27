@@ -86,6 +86,14 @@ export type AgentEvent =
       summary?: string;
     }
   | {
+      /** Token-level delta of the final assistant message. Fires only
+       * when the model is producing its final answer (no more tool
+       * calls) — the UI appends the text to the assistant turn's
+       * content as it arrives. */
+      kind: "delta";
+      text: string;
+    }
+  | {
       kind: "final";
       message: string;
       tokens: { input: number; output: number; total: number };
@@ -153,6 +161,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
           : "Deciding what to do next…",
     });
 
+    // Heuristic: only stream tokens when we believe THIS turn will
+    // produce the final answer. The model can still emit tool_calls
+    // in a streamed response (we handle that), but most turns that
+    // start with content are final. Always streaming would still
+    // work — this just avoids a tiny extra payload for tool turns.
+    const isLikelyFinalTurn = turn > 1;
+
     let result;
     try {
       result = await groqChat({
@@ -164,6 +179,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
         temperature,
         maxCompletionTokens: 2_000,
         timeoutMs: perCallTimeoutMs,
+        onDelta: isLikelyFinalTurn
+          ? (text) => emit({ kind: "delta", text })
+          : undefined,
       });
     } catch (err) {
       const detail =

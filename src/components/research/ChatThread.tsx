@@ -181,7 +181,11 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
         >
           <div className="max-w-[680px] mx-auto px-6 sm:px-10 py-4">
             <div className="flex items-end gap-3">
+              <label htmlFor="forge-chat-composer" className="sr-only">
+                Chat message
+              </label>
               <textarea
+                id="forge-chat-composer"
                 ref={composerRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -193,6 +197,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 }
                 rows={1}
                 disabled={sending}
+                aria-label="Ask Forge"
                 className="flex-1 min-w-0 resize-none bg-transparent text-[15px] text-foreground placeholder:text-muted leading-relaxed py-2 focus:outline-none disabled:opacity-60 font-display"
                 style={{ caretColor: "var(--violet)" }}
               />

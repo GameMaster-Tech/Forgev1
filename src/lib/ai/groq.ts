@@ -119,6 +119,11 @@ export interface GroqRequest {
   tools?: ToolDefinition[];
   toolChoice?: ToolChoice;
   timeoutMs?: number;
+  /** Optional token-level delta callback — receives each content
+   * chunk as Groq streams it. When set, `groqChat` issues a
+   * stream:true request and assembles the final `content` itself so
+   * the return shape stays identical. */
+  onDelta?: (delta: string) => void;
 }
 
 export interface GroqResult {
@@ -203,6 +208,7 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
 
   const t0 = Date.now();
 
+  const wantsStream = !!req.onDelta;
   const body: Record<string, unknown> = {
     model,
     messages: messages.map(serializeMessage),
@@ -216,9 +222,13 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
     body.tools = req.tools;
     body.tool_choice = req.toolChoice ?? "auto";
   }
+  // Streaming + tools combine fine on the wire, but the tool-call
+  // path needs the full assembled response anyway — so we only ask
+  // for stream:true when the caller actually subscribed to deltas.
+  if (wantsStream) body.stream = true;
 
   console.log(
-    `[groq] → POST ${ENDPOINT} model=${model} messages=${messages.length} promptChars=${promptChars} maxCompletionTokens=${maxTokens} tools=${req.tools?.length ?? 0} json=${req.jsonResponse ? "yes" : "no"}`,
+    `[groq] → POST ${ENDPOINT} model=${model} messages=${messages.length} promptChars=${promptChars} maxCompletionTokens=${maxTokens} tools=${req.tools?.length ?? 0} stream=${wantsStream ? "yes" : "no"} json=${req.jsonResponse ? "yes" : "no"}`,
   );
 
   try {
@@ -250,6 +260,30 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
         `[groq] ✗ ${res.status} ${res.statusText} in ${durationMs}ms — ${detail}`,
       );
       throw new GroqApiError(`Groq ${res.status}: ${detail}`, res.status, detail);
+    }
+
+    // Streaming branch — Groq returns OpenAI-compatible SSE chunks.
+    // We assemble the full content + tool_calls so the return shape
+    // stays identical to the non-streaming path; the only difference
+    // is `onDelta` fires for every content fragment as it arrives.
+    if (wantsStream && res.body) {
+      const assembled = await consumeGroqStream(res.body, req.onDelta);
+      const finalMs = Date.now() - t0;
+      console.log(
+        `[groq] ✓ stream done in ${finalMs}ms model=${assembled.model ?? model} tokens=in:${assembled.usage.prompt_tokens}/out:${assembled.usage.completion_tokens}/total:${assembled.usage.total_tokens} contentChars=${assembled.content.length} toolCalls=${assembled.toolCalls.length} stop=${assembled.finishReason}`,
+      );
+      return {
+        content: assembled.content,
+        toolCalls: assembled.toolCalls,
+        stopReason: assembled.finishReason,
+        tokenUsage: {
+          input: assembled.usage.prompt_tokens,
+          output: assembled.usage.completion_tokens,
+          total: assembled.usage.total_tokens,
+        },
+        model: assembled.model ?? model,
+        durationMs: finalMs,
+      };
     }
 
     const data = (await res.json()) as ChatCompletionResponse;
@@ -311,4 +345,137 @@ function serializeMessage(m: ChatMessage): Record<string, unknown> {
   }
   out.content = m.content ?? "";
   return out;
+}
+
+/* ─────────────────── stream parsing ─────────────────── */
+
+interface StreamedToolCallFragment {
+  index: number;
+  id?: string;
+  type?: "function";
+  function?: { name?: string; arguments?: string };
+}
+
+interface StreamedChoice {
+  index?: number;
+  delta?: {
+    role?: string;
+    content?: string | null;
+    tool_calls?: StreamedToolCallFragment[];
+  };
+  finish_reason?: string | null;
+}
+
+interface StreamedChunk {
+  id?: string;
+  model?: string;
+  choices?: StreamedChoice[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+interface AssembledStreamResult {
+  content: string;
+  toolCalls: ToolCall[];
+  finishReason: string;
+  model: string | null;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}
+
+/**
+ * Consume a Groq SSE response body and assemble the equivalent of a
+ * non-streaming response. Fires `onDelta(text)` for every content
+ * fragment so the UI can paint tokens as they arrive.
+ *
+ * Tool-call fragments are accumulated by `index` per the OpenAI spec:
+ *
+ *   tool_calls[0]: { id: "call_x", function: { name: "search" } }
+ *   tool_calls[0]: { function: { arguments: '{"q' } }
+ *   tool_calls[0]: { function: { arguments: '":"hi"}' } }
+ *   tool_calls[1]: { id: "call_y", function: { name: "list" } }
+ *
+ * → assembled as two calls.
+ */
+async function consumeGroqStream(
+  body: ReadableStream<Uint8Array>,
+  onDelta: ((d: string) => void) | undefined,
+): Promise<AssembledStreamResult> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  let content = "";
+  let finishReason = "stop";
+  let model: string | null = null;
+  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+  // Per-index assembly for tool calls.
+  const partial = new Map<number, { id: string; name: string; arguments: string }>();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split(/\n\n/);
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      for (const line of frame.split(/\n/)) {
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+
+        let chunk: StreamedChunk;
+        try {
+          chunk = JSON.parse(payload) as StreamedChunk;
+        } catch {
+          continue;
+        }
+        if (!model && chunk.model) model = chunk.model;
+        if (chunk.usage) {
+          usage.prompt_tokens = chunk.usage.prompt_tokens ?? usage.prompt_tokens;
+          usage.completion_tokens = chunk.usage.completion_tokens ?? usage.completion_tokens;
+          usage.total_tokens = chunk.usage.total_tokens ?? usage.total_tokens;
+        }
+
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+
+        const delta = choice.delta;
+        if (delta?.content) {
+          content += delta.content;
+          onDelta?.(delta.content);
+        }
+        if (delta?.tool_calls) {
+          for (const frag of delta.tool_calls) {
+            const idx = typeof frag.index === "number" ? frag.index : 0;
+            const cur =
+              partial.get(idx) ?? { id: "", name: "", arguments: "" };
+            if (frag.id) cur.id = frag.id;
+            if (frag.function?.name) cur.name = frag.function.name;
+            if (typeof frag.function?.arguments === "string") {
+              cur.arguments += frag.function.arguments;
+            }
+            partial.set(idx, cur);
+          }
+        }
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+      }
+    }
+  }
+
+  const toolCalls: ToolCall[] = Array.from(partial.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, v]) => ({
+      id: v.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+      type: "function" as const,
+      function: { name: v.name, arguments: v.arguments || "{}" },
+    }))
+    .filter((c) => c.function.name);
+
+  return { content, toolCalls, finishReason, model, usage };
 }

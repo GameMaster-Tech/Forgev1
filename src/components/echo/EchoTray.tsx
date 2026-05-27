@@ -40,6 +40,7 @@ import {
 import type { EchoAction, EchoNotice, EchoSeverity } from "@/lib/echo/types";
 import { useEchoNotices } from "@/hooks/useEchoNotices";
 import { useEchoScan } from "@/hooks/useEchoScan";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
 
@@ -70,6 +71,11 @@ export function EchoTray({ uid, open, onClose }: EchoTrayProps) {
   const notices = useEchoNotices(uid);
   const scan = useEchoScan(uid);
   const router = useRouter();
+
+  // Keyboard a11y — trap focus inside the tray while it's open,
+  // wrap Tab / Shift-Tab, close on Escape, restore focus to the
+  // triggering element on unmount.
+  const panelRef = useFocusTrap<HTMLDivElement>({ active: open, onClose });
 
   // Mark every visible notice as seen the moment the tray opens.
   useEffect(() => {
@@ -107,13 +113,15 @@ export function EchoTray({ uid, open, onClose }: EchoTrayProps) {
           {/* Panel */}
           <motion.aside
             key="echo-panel"
+            ref={panelRef}
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ duration: 0.28, ease: EASE }}
             className="fixed right-0 top-0 bottom-0 z-[80] w-full sm:w-[380px] bg-background border-l border-border shadow-[-20px_0_40px_-20px_rgba(0,0,0,0.25)] flex flex-col"
             role="dialog"
-            aria-label="Echo"
+            aria-modal="true"
+            aria-label="Echo — tension surface"
           >
             {/* Header */}
             <div className="px-5 pt-5 pb-3 border-b border-border flex items-start gap-3">

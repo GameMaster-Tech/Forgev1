@@ -42,6 +42,14 @@ import {
 import { DEFAULT_MODEL, type ChatMessage } from "@/lib/ai/groq";
 import { runAgent } from "@/lib/ai/agent";
 import { buildRegistry } from "@/lib/ai/tools/registry";
+import {
+  checkPromptInjection,
+  enforceDailyAiQuota,
+  logRedactions,
+  peekMonthlyBudget,
+  recordTokensAndCheckBudget,
+  redactPii,
+} from "@/lib/server/llm-guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -100,17 +108,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const userMessage =
+  const rawUserMessage =
     typeof body.userMessage === "string" ? body.userMessage.trim() : "";
-  if (!userMessage) {
+  if (!rawUserMessage) {
     return NextResponse.json({ error: "userMessage is required" }, { status: 400 });
   }
-  if (userMessage.length > MAX_TURN_CHARS) {
+  if (rawUserMessage.length > MAX_TURN_CHARS) {
     return NextResponse.json(
       { error: `userMessage too long (max ${MAX_TURN_CHARS} chars)` },
       { status: 400 },
     );
   }
+
+  // LLM-guard pipeline — same shape as the SSE variant.
+  const inj = checkPromptInjection(rawUserMessage);
+  if (!inj.ok) {
+    return NextResponse.json({ error: inj.reason ?? "Request blocked." }, { status: 400 });
+  }
+  const quota = await enforceDailyAiQuota(auth.uid);
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.reason ?? "Daily limit reached." }, { status: 429 });
+  }
+  const budget = await peekMonthlyBudget();
+  if (!budget.ok) {
+    return NextResponse.json({ error: budget.reason ?? "Service paused." }, { status: 503 });
+  }
+  const redaction = redactPii(rawUserMessage);
+  logRedactions(`uid=${auth.uid} chat`, redaction.counts);
+  const userMessage = redaction.text;
 
   const historyRaw = Array.isArray(body.history) ? body.history : [];
   const history: { role: "user" | "assistant"; content: string }[] = [];
@@ -156,7 +181,10 @@ export async function POST(request: Request) {
   });
 
   const messages: ChatMessage[] = [
-    ...trimmed.map((t) => ({ role: t.role, content: t.content }) as ChatMessage),
+    ...trimmed.map(
+      (t) =>
+        ({ role: t.role, content: redactPii(t.content).text }) as ChatMessage,
+    ),
     { role: "user", content: userMessage },
   ];
 
@@ -179,6 +207,8 @@ export async function POST(request: Request) {
       temperature: 0.5,
       perCallTimeoutMs: 30_000,
     });
+
+    void recordTokensAndCheckBudget(result.tokens.total);
 
     return NextResponse.json({
       role: "assistant" as const,
