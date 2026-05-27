@@ -27,6 +27,7 @@ import {
   getConversation,
   type FirestoreMessage,
 } from "@/lib/firebase/conversations";
+import { useChatStream } from "./useChatStream";
 
 export interface ChatTurn {
   id: string;
@@ -38,6 +39,34 @@ export interface ChatTurn {
   pending?: boolean;
   /** Tools the agent invoked while producing this turn (assistant only). */
   steps?: Array<{ turn: number; tool: string; durationMs: number }>;
+  /**
+   * Live thinking trace — populated DURING the stream and frozen
+   * once the final event lands. Each entry is one tool's lifecycle:
+   * a label that updates from start → done, plus optional web sources
+   * for the "currently browsing" chip strip.
+   */
+  liveTrace?: LiveTraceItem[];
+}
+
+/** One row in the assistant's live thinking trace. */
+export interface LiveTraceItem {
+  /** Unique key — `<turn>:<tool>:<seq>` so React reconciles cleanly. */
+  key: string;
+  turn: number;
+  tool: string;
+  /** Human label shown to the user. Updates from start → done. */
+  label: string;
+  /** True while the tool is in flight; false once it has returned. */
+  inflight: boolean;
+  durationMs?: number;
+  /** Query the user is seeing the model run (search/answer tools). */
+  query?: string;
+  /** Top URLs the model is "currently browsing" — populated on done. */
+  sources?: { url: string; title?: string }[];
+  /** Compact numeric summary ("6 results", "4 docs"). */
+  summary?: string;
+  /** True when the tool returned an error. */
+  errored?: boolean;
 }
 
 export interface UseChatThreadOptions {
@@ -117,6 +146,7 @@ export function useChatThread({
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const streamAgent = useChatStream();
 
   // Hydrate from Firestore when an existing conversation id is supplied.
   useEffect(() => {
@@ -235,33 +265,121 @@ export function useChatThread({
           .slice(-MAX_HISTORY_FOR_API)
           .map(({ role, content }) => ({ role, content }));
 
-        const headers = await authHeaders();
-        const res = await fetch("/api/research/chat", {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectName,
-            projectId,
-            history,
-            userMessage: trimmed,
-          }),
+        // Stream the agent's thinking + tool events live. Each event
+        // updates the assistant turn's `liveTrace` in place so the UI
+        // can render "Searching the web for 'X'…" → "Found 6 results"
+        // chips with source URLs as they land.
+        let traceCounter = 0;
+        const result = await streamAgent({
+          projectId,
+          projectName: projectName ?? null,
+          userMessage: trimmed,
+          // Filter out system turns — the API only accepts user / assistant.
+          history: history.map(({ role, content }) => ({
+            role: role as "user" | "assistant",
+            content,
+          })),
+          onEvent: (event) => {
+            if (event.kind === "thinking") {
+              const key = `t${event.turn}:think:${traceCounter++}`;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantTurn.id
+                    ? {
+                        ...m,
+                        liveTrace: [
+                          ...(m.liveTrace ?? []),
+                          {
+                            key,
+                            turn: event.turn,
+                            tool: "thinking",
+                            label: event.text,
+                            inflight: true,
+                          },
+                        ],
+                      }
+                    : m,
+                ),
+              );
+              return;
+            }
+            if (event.kind === "tool_start") {
+              const key = `t${event.turn}:${event.tool}:${traceCounter++}`;
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== assistantTurn.id) return m;
+                  // Mark the most recent "thinking" item as finished so
+                  // the UI swaps it for the tool chip.
+                  const trace = (m.liveTrace ?? []).map((t) =>
+                    t.tool === "thinking" && t.inflight
+                      ? { ...t, inflight: false }
+                      : t,
+                  );
+                  trace.push({
+                    key,
+                    turn: event.turn,
+                    tool: event.tool,
+                    label: event.label,
+                    inflight: true,
+                    query: event.query,
+                  });
+                  return { ...m, liveTrace: trace };
+                }),
+              );
+              return;
+            }
+            if (event.kind === "tool_done") {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== assistantTurn.id) return m;
+                  const trace = (m.liveTrace ?? []).map((t) =>
+                    t.tool === event.tool && t.turn === event.turn && t.inflight
+                      ? {
+                          ...t,
+                          label: event.label,
+                          inflight: false,
+                          durationMs: event.durationMs,
+                          sources: event.sources,
+                          summary: event.summary,
+                          errored: event.label.endsWith("failed"),
+                        }
+                      : t,
+                  );
+                  return { ...m, liveTrace: trace };
+                }),
+              );
+              return;
+            }
+            if (event.kind === "error") {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantTurn.id
+                    ? {
+                        ...m,
+                        liveTrace: [
+                          ...(m.liveTrace ?? []).map((t) =>
+                            t.inflight ? { ...t, inflight: false } : t,
+                          ),
+                          {
+                            key: `t:err:${traceCounter++}`,
+                            turn: 0,
+                            tool: "error",
+                            label: event.message,
+                            inflight: false,
+                            errored: true,
+                          },
+                        ],
+                      }
+                    : m,
+                ),
+              );
+            }
+          },
         });
-        if (!res.ok) {
-          let detail = `Chat failed (${res.status})`;
-          try {
-            const data = (await res.json()) as { error?: string };
-            if (data.error) detail = data.error;
-          } catch {
-            /* fall through */
-          }
-          throw new Error(detail);
-        }
-        const data = (await res.json()) as {
-          content?: string;
-          steps?: Array<{ turn: number; tool: string; durationMs: number }>;
-        };
-        const reply = (data.content ?? "").trim();
-        const stepsForTurn = Array.isArray(data.steps) ? data.steps : undefined;
+        const reply = (result.message ?? "").trim();
+        // Compact steps for persisted history (the assistant turn stays
+        // lightweight in Firestore — liveTrace is in-memory only).
+        const stepsForTurn = buildStepsFromTrace(assistantTurn.id);
 
         const persistedAssistantId = await appendMessage(convoId, {
           userId: user.uid,
@@ -279,6 +397,10 @@ export function useChatThread({
                   content: reply,
                   pending: false,
                   steps: stepsForTurn,
+                  // Freeze any leftover inflight markers.
+                  liveTrace: (m.liveTrace ?? []).map((t) =>
+                    t.inflight ? { ...t, inflight: false } : t,
+                  ),
                 }
               : m,
           ),
@@ -295,8 +417,38 @@ export function useChatThread({
         setSending(false);
       }
     },
-    [projectId, projectName, ensureConversation, messages, modelId],
+    [projectId, projectName, ensureConversation, messages, modelId, streamAgent, setMessages],
   );
+
+  /**
+   * Build a compact `steps` array for the persisted turn. We pull
+   * straight from the LATEST messages state so we capture whatever
+   * landed during the stream — `messages` in closure scope is one
+   * tick behind. Best-effort: if the trace is missing, return undefined.
+   */
+  function buildStepsFromTrace(
+    turnId: string,
+  ): Array<{ turn: number; tool: string; durationMs: number }> | undefined {
+    // Defer to next paint so React's commit lands first.
+    // We can't read the freshest state synchronously from here, so we
+    // reach into the current snapshot via a setter trick. The cost is
+    // a no-op state set — React skips re-render when the value is the
+    // same array reference.
+    let snapshot: ChatTurn[] = [];
+    setMessages((prev) => {
+      snapshot = prev;
+      return prev;
+    });
+    const target = snapshot.find((m) => m.id === turnId);
+    if (!target?.liveTrace) return undefined;
+    return target.liveTrace
+      .filter((t) => t.tool !== "thinking" && t.tool !== "error")
+      .map((t) => ({
+        turn: t.turn,
+        tool: t.tool,
+        durationMs: t.durationMs ?? 0,
+      }));
+  }
 
   const reset = useCallback(() => {
     setConversationId(null);

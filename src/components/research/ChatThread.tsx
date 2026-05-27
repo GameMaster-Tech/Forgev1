@@ -27,8 +27,25 @@ import {
   type KeyboardEvent,
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Sparkles, RotateCcw } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Brain,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  FileText,
+  Globe,
+  ListChecks,
+  Loader2,
+  Rocket,
+  RotateCcw,
+  Search as SearchIcon,
+  Sparkles,
+  Target,
+  Wand2,
+} from "lucide-react";
 import { Markdown } from "./Markdown";
+import type { LiveTraceItem } from "@/hooks/useChatThread";
 import type { ChatTurn } from "@/hooks/useChatThread";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
@@ -248,6 +265,14 @@ function Turn({ turn }: { turn: ChatTurn }) {
         {turn.pending ? <ThinkingPulse /> : null}
       </div>
 
+      {/* Live thinking trace — only on the assistant turn currently
+          streaming OR on a completed turn that had tool activity. Shows
+          one chip per tool call with diverse, accurate labels and a
+          source-URL strip when the model is browsing the web. */}
+      {!isUser && turn.liveTrace && turn.liveTrace.length > 0 ? (
+        <LiveTrace items={turn.liveTrace} />
+      ) : null}
+
       {/* Body — user turns render as plain text (preserving the
           author's punctuation); assistant turns parse markdown so
           links, code, bold, headers etc. render properly. */}
@@ -381,4 +406,145 @@ function EmptyState({
       </ul>
     </motion.div>
   );
+}
+
+/* ────── live thinking trace ────── */
+
+/**
+ * Renders the assistant's live thinking surface during a stream:
+ * one stacked row per tool call, each row carrying a tool-specific
+ * icon, a humanized label that updates from "Searching the web for
+ * 'X'…" → "Found 6 web results", and (for web tools) a horizontal
+ * strip of the source domains the model is currently browsing.
+ *
+ * Anatomy:
+ *
+ *   ▍ icon · Searching the web for "q3 hiring benchmarks" …
+ *           [stripe.com] [bls.gov] [a16z.com]
+ *
+ * Inflight rows show a sliding sliver animation; completed rows
+ * collapse to a check mark and stay readable in the thread.
+ */
+function LiveTrace({ items }: { items: LiveTraceItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, ease: EASE }}
+      className="mb-3 ml-0 border-l border-border pl-3 space-y-1.5"
+    >
+      {items.map((it) => (
+        <TraceRow key={it.key} item={it} />
+      ))}
+    </motion.div>
+  );
+}
+
+function TraceRow({ item }: { item: LiveTraceItem }) {
+  const Icon = iconForTool(item.tool);
+  const tone = item.errored
+    ? "text-rose"
+    : item.inflight
+      ? "text-violet"
+      : "text-muted";
+  return (
+    <div className="flex items-start gap-2">
+      <span className={`shrink-0 mt-[3px] ${tone}`} aria-hidden>
+        {item.inflight ? (
+          <Loader2 size={11} strokeWidth={2} className="animate-spin" />
+        ) : item.errored ? (
+          <Icon size={11} strokeWidth={2} />
+        ) : (
+          <CheckCircle2 size={11} strokeWidth={2} className="text-green/80" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <Icon
+            size={11}
+            strokeWidth={2}
+            className={`${tone} opacity-70 mr-0.5 inline-block align-baseline`}
+          />
+          <span
+            className={`text-[12.5px] leading-snug ${
+              item.inflight ? "text-foreground" : item.errored ? "text-rose" : "text-muted"
+            }`}
+          >
+            {item.label}
+            {item.inflight ? "…" : null}
+          </span>
+          {item.summary && !item.inflight ? (
+            <span className="text-[10px] uppercase tracking-[0.14em] text-muted/70 font-medium tabular-nums">
+              · {item.summary}
+            </span>
+          ) : null}
+          {item.durationMs && !item.inflight ? (
+            <span className="text-[10px] text-muted/50 tabular-nums">
+              {item.durationMs}ms
+            </span>
+          ) : null}
+        </div>
+        {/* Currently-browsing source strip — only on web tools. */}
+        {item.sources && item.sources.length > 0 ? (
+          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+            {item.sources.map((s, i) => (
+              <a
+                key={`${s.url}-${i}`}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group inline-flex items-center gap-1 px-1.5 py-0.5 border border-border bg-background/60 text-[10px] text-muted hover:text-violet hover:border-violet/40 transition-colors"
+                title={s.title ?? s.url}
+              >
+                <Globe size={9} strokeWidth={2} className="opacity-60 group-hover:opacity-100" />
+                <span className="font-mono">{hostnameOf(s.url)}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function iconForTool(tool: string) {
+  switch (tool) {
+    case "thinking":
+      return Brain;
+    case "research_search":
+    case "research_answer":
+      return SearchIcon;
+    case "docs_list":
+      return ListChecks;
+    case "docs_read":
+      return BookOpen;
+    case "docs_create":
+    case "docs_update":
+      return FileText;
+    case "calendar_list_events":
+    case "calendar_create_event":
+    case "calendar_update_event":
+    case "calendar_delete_event":
+      return CalendarIcon;
+    case "tasks_list":
+    case "tasks_create":
+      return ListChecks;
+    case "habits_create":
+      return Rocket;
+    case "goals_create":
+      return Target;
+    case "error":
+      return Wand2;
+    default:
+      return Sparkles;
+  }
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url.slice(0, 32);
+  }
 }
