@@ -47,6 +47,13 @@ import {
 import { Markdown } from "./Markdown";
 import type { LiveTraceItem } from "@/hooks/useChatThread";
 import type { ChatTurn } from "@/hooks/useChatThread";
+import { useComposerCommands } from "@/hooks/useComposerCommands";
+import { useActiveProject } from "@/hooks/useActiveProject";
+import {
+  ComposerCommandsMenu,
+  type ComposerAction,
+} from "./ComposerCommandsMenu";
+import type { WorkspaceRef } from "@/hooks/useWorkspaceRefs";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
 const MODEL_LABEL = "llama-3.3-70b";
@@ -97,6 +104,24 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
       return d.toISOString().slice(0, 10);
     });
 
+    // Composer commands — @ pull / / do / # find. The state machine
+    // tracks the active trigger; the popover renders the right list;
+    // pickRef adds visible `@<Title>` token text + remembers the doc
+    // id so the chat route can resolve it server-side.
+    const { projectId: activeProjectId } = useActiveProject();
+    const cmd = useComposerCommands({
+      textareaRef: composerRef,
+      value: draft,
+      onChange: setDraft,
+    });
+    const [activeIndex, setActiveIndex] = useState(0);
+    const [refs, setRefs] = useState<Array<{ id: string; title: string }>>([]);
+    // Reset hovered row whenever the trigger changes so we never
+    // open a fresh popover with a stale highlight.
+    useEffect(() => {
+      setActiveIndex(0);
+    }, [cmd.state?.trigger]);
+
     useImperativeHandle(ref, () => ({
       focus: () => composerRef.current?.focus(),
     }));
@@ -119,17 +144,36 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     const submit = useCallback(
       async (text: string) => {
         if (!text.trim() || sending) return;
+        // Build the final message: # prefix becomes a forced web-search
+        // hint; remembered @ refs are appended as a "Referenced:" trailer
+        // so the agent loop's docs_read tool can pull them by id.
+        let finalMessage = text.trim();
+        if (finalMessage.startsWith("#")) {
+          const q = finalMessage.slice(1).trim();
+          if (q) {
+            finalMessage = `Please search the web for "${q}" first, then answer using the results.`;
+          }
+        }
+        const usedRefs = refs.filter((r) =>
+          text.includes(`@${r.title}`),
+        );
+        if (usedRefs.length > 0) {
+          finalMessage = `${finalMessage}\n\nReferenced docs (read these before answering):\n${usedRefs
+            .map((r) => `- "${r.title}" (docId: ${r.id})`)
+            .join("\n")}`;
+        }
         setDraft("");
+        setRefs([]);
         if (pastYouOn) {
-          await onSend(text, {
+          await onSend(finalMessage, {
             mode: "past-you",
             asOf: new Date(pastYouAsOf + "T00:00:00Z").toISOString(),
           });
         } else {
-          await onSend(text);
+          await onSend(finalMessage);
         }
       },
-      [onSend, sending, pastYouOn, pastYouAsOf],
+      [onSend, sending, pastYouOn, pastYouAsOf, refs],
     );
 
     const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -137,7 +181,85 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
       void submit(draft);
     };
 
+    // Action dispatcher for the / picker.
+    const runAction = useCallback(
+      (action: ComposerAction) => {
+        // Strip the trigger fragment first so we don't leave `/new`
+        // in the textarea after firing the action.
+        cmd.consume();
+        switch (action) {
+          case "new_chat":
+            onReset();
+            setDraft("");
+            setRefs([]);
+            return;
+          case "clear_draft":
+            setDraft("");
+            setRefs([]);
+            return;
+          case "toggle_past_you":
+            setPastYouOn((v) => !v);
+            return;
+          case "help":
+            setDraft(
+              "@ pulls a doc · / runs an action · # searches the web before answering.",
+            );
+            return;
+        }
+      },
+      [cmd, onReset],
+    );
+
+    // @ picker → insert visible token + remember the doc id.
+    const pickRef = useCallback(
+      (ref: WorkspaceRef) => {
+        cmd.replaceWith(`@${ref.title} `);
+        setRefs((prev) =>
+          prev.some((r) => r.id === ref.id)
+            ? prev
+            : [...prev, { id: ref.id, title: ref.title }],
+        );
+      },
+      [cmd],
+    );
+
     const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Popover navigation has priority when open.
+      if (cmd.state) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cmd.close();
+          return;
+        }
+        // # mode shows a static hint and has no list to navigate.
+        if (cmd.state.trigger !== "#") {
+          if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+            e.preventDefault();
+            setActiveIndex((i) => i + 1);
+            return;
+          }
+          if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+            e.preventDefault();
+            setActiveIndex((i) => Math.max(0, i - 1));
+            return;
+          }
+          if (e.key === "Enter") {
+            // Defer to the popover via a sentinel — emit a custom
+            // event the popover listens for. Simpler: dispatch
+            // through a ref. We use a window event because the
+            // popover lives inside the same DOM tree as the
+            // textarea and React's onMouseDown→pick path is
+            // already wired.
+            e.preventDefault();
+            window.dispatchEvent(
+              new CustomEvent("forge:composer:enter", {
+                detail: { index: activeIndex },
+              }),
+            );
+            return;
+          }
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         void submit(draft);
@@ -201,8 +323,20 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
             violet outline so typing doesn't paint a blue block. */}
         <form
           onSubmit={handleSubmit}
-          className="composer-bare border-t border-border bg-background"
+          className="composer-bare border-t border-border bg-background relative"
         >
+          {/* @ / / / # picker — absolute, anchored above the composer. */}
+          {cmd.state ? (
+            <ComposerCommandsMenu
+              state={cmd.state}
+              projectId={activeProjectId}
+              activeIndex={activeIndex}
+              setActiveIndex={setActiveIndex}
+              onPickRef={pickRef}
+              onAction={runAction}
+              onClose={cmd.close}
+            />
+          ) : null}
           <div className="max-w-[680px] mx-auto px-6 sm:px-10 py-4">
             <div className="flex items-end gap-3">
               <label htmlFor="forge-chat-composer" className="sr-only">
@@ -212,7 +346,19 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 id="forge-chat-composer"
                 ref={composerRef}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  // Defer to next tick so the textarea's caret
+                  // position reflects the just-typed character.
+                  queueMicrotask(() => cmd.refresh());
+                }}
+                onSelect={() => cmd.refresh()}
+                onClick={() => cmd.refresh()}
+                onBlur={() => {
+                  // Don't close immediately on blur — mousedown on a
+                  // popover row needs to fire first.
+                  setTimeout(() => cmd.close(), 120);
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   sending
