@@ -1,41 +1,43 @@
 "use client";
 
 /**
- * Sync — section layout.
+ * Checks — section layout.
  *
- * Wraps every /sync/* page in <SyncProvider> so the five sub-routes
- * (Overview, Conflicts, Patch, Documents, History) read from the
- * same graph. Header mirrors /projects + /teams: static title,
- * description, and a right-side action strip (Reset + Compile).
- * Dynamic verdicts live on the Overview page, not in the header —
- * so the header stays calm and the route-tab strip below stays the
- * visual anchor for navigation.
+ * Minimal header pattern shared with /pulse and /calendar after the
+ * redesign sweep: one-line title + 1-line caption + a single primary
+ * action (Compile) and an overflow for Reset. The dynamic status
+ * (verdict card, conflict counts) lives on the Overview page, not the
+ * layout — so navigating between sub-routes never refreshes the
+ * header.
+ *
+ * Renamed Sync → Checks in user-facing copy; the route stays /sync so
+ * existing bookmarks survive.
  */
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
+  Check as CheckIcon,
   GitBranch,
   Loader2,
+  MoreHorizontal,
   RotateCcw,
-  Sparkles,
-  type LucideIcon,
 } from "lucide-react";
+import { useRef, useState } from "react";
 import { SectionSubNav, type SubNavItem } from "@/components/app/SectionSubNav";
 import { SyncProvider, useSync } from "./SyncProvider";
 import { ease } from "./_components";
 
-type NavRoute = {
+interface NavRoute {
   href: string;
   label: string;
-  icon: LucideIcon;
   badgeKey: "conflicts" | "patch" | null;
-};
+}
 
 const SUBNAV: NavRoute[] = [
-  { href: "/sync",            label: "Overview",  icon: Sparkles,   badgeKey: null },
-  { href: "/sync/conflicts",  label: "Conflicts", icon: GitBranch,  badgeKey: "conflicts" },
-  { href: "/sync/patch",      label: "Patch",     icon: ArrowRight, badgeKey: "patch" },
+  { href: "/sync", label: "Overview", badgeKey: null },
+  { href: "/sync/conflicts", label: "Conflicts", badgeKey: "conflicts" },
+  { href: "/sync/patch", label: "Patch", badgeKey: "patch" },
 ];
 
 export default function SyncLayout({ children }: { children: React.ReactNode }) {
@@ -58,53 +60,95 @@ function SyncShell({ children }: { children: React.ReactNode }) {
     resetDemo,
   } = useSync();
 
-  const items: SubNavItem[] = SUBNAV.map(({ badgeKey, ...rest }) => {
-    let badge: number | null = null;
-    if (badgeKey === "conflicts") badge = conflictsCount || null;
-    else if (badgeKey === "patch") badge = hasPatch ? patchChanges || 1 : null;
-    return { ...rest, badge };
-  });
-  // No longer surfaced after Documents/History tabs were removed.
+  const items: SubNavItem[] = SUBNAV.map(({ badgeKey, href, label }) => ({
+    href,
+    label,
+    icon: badgeKey === "conflicts" ? GitBranch : badgeKey === "patch" ? ArrowRight : CheckIcon,
+    badge:
+      badgeKey === "conflicts"
+        ? conflictsCount || null
+        : badgeKey === "patch"
+          ? hasPatch
+            ? patchChanges || 1
+            : null
+          : null,
+  }));
   void documentsCount;
   void historyCount;
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <div className="min-h-full bg-background">
       <motion.header
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease }}
-        className="border-b border-border px-6 sm:px-10 pt-10 pb-6"
+        transition={{ duration: 0.22, ease }}
+        className="border-b border-border px-6 sm:px-10 pt-7 pb-4"
       >
-        <div className="flex items-end justify-between gap-6 flex-wrap">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
-              <GitBranch size={11} strokeWidth={1.75} />
-              Sync
-            </p>
-            <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
-              Check for conflicts.
+            <h1 className="font-display font-bold text-[22px] sm:text-[26px] text-foreground tracking-[-0.02em] leading-[1.1]">
+              Checks
             </h1>
-            <p className="text-[13px] text-muted mt-2 max-w-xl leading-relaxed">
-              Sync scans your documents for numbers that contradict each other and suggests a single fix to make everything line up.
+            <p className="text-[12.5px] text-muted mt-1 max-w-xl leading-relaxed">
+              Catches numbers and claims across your docs that contradict each other.
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={resetDemo}
-              className="flex items-center gap-2 border border-border text-foreground hover:border-violet hover:text-violet text-[11px] font-semibold uppercase tracking-[0.12em] px-4 py-2.5 transition-colors duration-150"
-            >
-              <RotateCcw size={12} strokeWidth={2.25} />
-              Reset
-            </button>
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={compile}
               disabled={computing}
-              className="flex items-center gap-2 bg-violet text-white hover:bg-violet/90 disabled:opacity-60 text-[11px] font-semibold uppercase tracking-[0.12em] px-5 py-2.5 transition-colors duration-150"
+              className="inline-flex items-center gap-1.5 bg-violet text-white hover:bg-violet/90 disabled:opacity-60 text-[11px] font-semibold uppercase tracking-[0.14em] px-3.5 py-2 transition-colors"
             >
-              {computing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} strokeWidth={2.25} />}
-              Compile
+              {computing ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <CheckIcon size={12} strokeWidth={2.25} />
+              )}
+              Run check
             </button>
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="More"
+                className="p-2 text-muted hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+              >
+                <MoreHorizontal size={14} strokeWidth={1.75} />
+              </button>
+              <AnimatePresence>
+                {menuOpen ? (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setMenuOpen(false)}
+                      aria-hidden
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.14 }}
+                      className="absolute right-0 top-full mt-1 w-40 bg-background border border-border shadow-[0_16px_32px_-16px_rgba(0,0,0,0.25)] z-50"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          resetDemo();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                      >
+                        <RotateCcw size={12} strokeWidth={1.75} />
+                        Reset state
+                      </button>
+                    </motion.div>
+                  </>
+                ) : null}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </motion.header>

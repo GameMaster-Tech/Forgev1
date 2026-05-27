@@ -36,28 +36,51 @@ import {
 export default function CalendarGridPage() {
   const { view, setView, cursor, setCursor, allEvents, setActiveEvent } = useCalendar();
 
+  // KindLegend is reference-only — most users don't need it after
+  // the first session. Collapsed by default, expandable in-line.
+  const [legendOpen, setLegendOpen] = useState(false);
+
   return (
-    <div className="px-6 sm:px-10 pt-8 pb-16">
+    <div className="px-6 sm:px-10 pt-6 pb-16">
+      {/* Single control row: month label · navigator on the left,
+          legend toggle + view switcher on the right. One line on
+          desktop, wraps cleanly on small screens. */}
       <motion.div
-        initial={{ opacity: 0, y: 6 }}
+        initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease }}
-        className="flex items-center justify-between gap-3 flex-wrap mb-5"
+        transition={{ duration: 0.22, ease }}
+        className="flex items-center justify-between gap-3 flex-wrap mb-4"
       >
         <div className="flex items-center gap-3 flex-wrap">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium tabular-nums">
+          <p className="font-display font-semibold text-[15px] text-foreground tabular-nums tracking-[-0.01em]">
             {monthLabel(cursor)}
           </p>
           <Navigator cursor={cursor} setCursor={setCursor} view={view} />
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setLegendOpen((v) => !v)}
+            aria-expanded={legendOpen}
+            className="text-[10px] uppercase tracking-[0.14em] font-medium text-muted hover:text-foreground transition-colors px-2 py-1"
+          >
+            {legendOpen ? "Hide legend" : "Legend"}
+          </button>
           <ViewSwitcher view={view} onChange={setView} />
         </div>
       </motion.div>
 
-      <div className="mb-4">
-        <KindLegend />
-      </div>
+      {legendOpen ? (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.18, ease }}
+          className="mb-4"
+        >
+          <KindLegend />
+        </motion.div>
+      ) : null}
 
       <div className="max-w-6xl">
         {view === "month"   && <MonthGrid cursor={cursor} events={allEvents} onSelect={setActiveEvent} />}

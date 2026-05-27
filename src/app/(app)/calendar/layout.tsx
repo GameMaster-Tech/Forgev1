@@ -84,30 +84,36 @@ function CalendarShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-full bg-background">
+      {/* Minimal header — aligned with /sync (Checks) and /pulse
+          (Freshness): single-line title + one-line caption + a
+          primary action. RealtimeIndicator collapses into the
+          action strip; it's small enough to read inline. */}
       <motion.header
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease }}
-        className="border-b border-border px-6 sm:px-10 pt-10 pb-6"
+        transition={{ duration: 0.22, ease }}
+        className="border-b border-border px-6 sm:px-10 pt-7 pb-4"
       >
-        <div className="flex items-end justify-between gap-6 flex-wrap">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-2 flex items-center gap-2">
-              <CalendarIcon size={11} strokeWidth={1.75} />
+            <h1 className="font-display font-bold text-[22px] sm:text-[26px] text-foreground tracking-[-0.02em] leading-[1.1] inline-flex items-center gap-2">
+              <CalendarIcon
+                size={16}
+                strokeWidth={2}
+                className="text-violet -mt-px"
+                aria-hidden
+              />
               Calendar
-            </p>
-            <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-foreground tracking-[-0.025em] leading-[1.05]">
-              Your schedule.
             </h1>
-            <p className="text-[13px] text-muted mt-2 max-w-xl leading-relaxed">
-              Events, tasks, habits, and goals in one place. Forge auto-arranges them around your energy.
+            <p className="text-[12.5px] text-muted mt-1 max-w-xl leading-relaxed">
+              Events, tasks, habits and goals — auto-arranged around your energy.
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <RealtimeIndicator status={streamStatus} presence={presence} lastSyncAt={lastSyncAt} />
             <button
               onClick={openNewEvent}
-              className="flex items-center gap-2 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.12em] px-5 py-2.5 transition-colors duration-150"
+              className="inline-flex items-center gap-1.5 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.14em] px-3.5 py-2 transition-colors"
             >
               <Plus size={12} strokeWidth={2.25} />
               New event
