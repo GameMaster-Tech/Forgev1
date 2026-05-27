@@ -13,6 +13,21 @@ import { auth, db } from "./config";
 
 const googleProvider = new GoogleAuthProvider();
 
+/**
+ * Build a per-call provider so we can attach `login_hint` for the
+ * multi-account switcher without mutating the shared singleton.
+ * Google's OAuth honours `login_hint` — when the hinted email is
+ * already in the browser's Google session cookies, the chooser
+ * skips the picker and lands the user directly. When it isn't,
+ * Google asks for the password.
+ */
+function googleProviderFor(loginHint?: string): GoogleAuthProvider {
+  if (!loginHint) return googleProvider;
+  const p = new GoogleAuthProvider();
+  p.setCustomParameters({ login_hint: loginHint });
+  return p;
+}
+
 export async function signUp(email: string, password: string, name: string, discipline: string) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(credential.user, { displayName: name });
@@ -31,8 +46,8 @@ export async function signIn(email: string, password: string) {
   return credential.user;
 }
 
-export async function signInWithGoogle() {
-  const credential = await signInWithPopup(auth, googleProvider);
+export async function signInWithGoogle(loginHint?: string) {
+  const credential = await signInWithPopup(auth, googleProviderFor(loginHint));
   const user = credential.user;
   // Create user doc if first sign-in
   await setDoc(

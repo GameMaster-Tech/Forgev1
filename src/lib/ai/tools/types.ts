@@ -28,6 +28,13 @@ export interface ToolContext {
   projectId: string | null;
   /** Wall-clock when the agent loop started — useful for "today"-relative scheduling. */
   startedAt: number;
+  /**
+   * Past-You temporal bound — when set, tools that support
+   * temporal scoping (see `past-you.ts`) filter to artifacts that
+   * existed at or before this ISO timestamp. Ignored by tools that
+   * have no temporal meaning.
+   */
+  asOf?: string;
 }
 
 /**

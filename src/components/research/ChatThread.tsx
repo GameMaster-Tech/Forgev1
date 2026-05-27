@@ -60,7 +60,15 @@ interface ChatThreadProps {
   sending: boolean;
   loading: boolean;
   error: string | null;
-  onSend: (text: string) => Promise<void>;
+  /**
+   * Accepts an optional second arg so the composer's "Past-You"
+   * toggle can hand the date through. Plain string-only sends still
+   * work — `opts` defaults to live mode.
+   */
+  onSend: (
+    text: string,
+    opts?: { mode?: "live" | "past-you"; asOf?: string },
+  ) => Promise<void>;
   onReset: () => void;
   projectName?: string | null;
 }
@@ -79,6 +87,15 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     const [draft, setDraft] = useState("");
     const composerRef = useRef<HTMLTextAreaElement | null>(null);
     const scrollerRef = useRef<HTMLDivElement | null>(null);
+    // Past-You mode — when on, sends route through the temporal
+    // persona scoped to `pastYouAsOf`. Default date is 30 days ago so
+    // the user can hit Send the moment they flip the toggle.
+    const [pastYouOn, setPastYouOn] = useState(false);
+    const [pastYouAsOf, setPastYouAsOf] = useState<string>(() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      return d.toISOString().slice(0, 10);
+    });
 
     useImperativeHandle(ref, () => ({
       focus: () => composerRef.current?.focus(),
@@ -103,9 +120,16 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
       async (text: string) => {
         if (!text.trim() || sending) return;
         setDraft("");
-        await onSend(text);
+        if (pastYouOn) {
+          await onSend(text, {
+            mode: "past-you",
+            asOf: new Date(pastYouAsOf + "T00:00:00Z").toISOString(),
+          });
+        } else {
+          await onSend(text);
+        }
       },
-      [onSend, sending],
+      [onSend, sending, pastYouOn, pastYouAsOf],
     );
 
     const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -192,8 +216,12 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 onKeyDown={handleKeyDown}
                 placeholder={
                   sending
-                    ? "Forge is responding…"
-                    : "Ask anything"
+                    ? pastYouOn
+                      ? "Past-you is remembering…"
+                      : "Forge is responding…"
+                    : pastYouOn
+                      ? `Ask past-you (as of ${pastYouAsOf}) anything…`
+                      : "Ask anything"
                 }
                 rows={1}
                 disabled={sending}
@@ -214,10 +242,41 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 />
               </button>
             </div>
-            <div className="mt-1.5 flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-muted font-medium">
+            {/* Past-You toggle — flip on, pick a date, ask. Cheap to
+                add inline so the feature stays discoverable without
+                its own modal. Active state replaces the placeholder
+                so the user sees who they're talking to. */}
+            <div className="mt-1.5 flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-muted font-medium flex-wrap">
               <span className="tabular-nums">{MODEL_LABEL}</span>
               <span className="text-border">/</span>
               <span>Enter sends · Shift + Enter newline</span>
+              <span className="text-border ml-auto">·</span>
+              <button
+                type="button"
+                onClick={() => setPastYouOn((v) => !v)}
+                aria-pressed={pastYouOn}
+                aria-label="Toggle Past-You chat"
+                className={`inline-flex items-center gap-1.5 px-2 py-1 border transition-colors ${
+                  pastYouOn
+                    ? "text-violet border-violet/40 bg-violet/[0.06]"
+                    : "border-border hover:border-foreground/30 hover:text-foreground"
+                }`}
+              >
+                {pastYouOn ? "Past-you on" : "Talk to past-you"}
+              </button>
+              {pastYouOn ? (
+                <label className="inline-flex items-center gap-1 normal-case tracking-normal">
+                  <span className="sr-only">As of</span>
+                  <span aria-hidden>as of</span>
+                  <input
+                    type="date"
+                    value={pastYouAsOf}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => setPastYouAsOf(e.target.value)}
+                    className="bg-transparent border border-border focus:border-violet/60 focus:outline-none px-1.5 py-0.5 text-[11px] text-foreground tabular-nums"
+                  />
+                </label>
+              ) : null}
             </div>
           </div>
         </form>

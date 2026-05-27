@@ -21,6 +21,7 @@ import type { Tool, ToolContext, ToolDefinition } from "./types";
 import { CALENDAR_TOOLS } from "./calendar";
 import { DOC_TOOLS } from "./docs";
 import { RESEARCH_TOOLS } from "./research";
+import { PAST_YOU_TOOLS } from "./past-you";
 
 export type ToolGroup =
   | "calendar"
@@ -28,10 +29,16 @@ export type ToolGroup =
   | "docs"
   | "docs:read"
   | "research"
+  | "past-you"
   | "all";
 
 /** Flat list of every tool by id. */
-const ALL_TOOLS: Tool[] = [...CALENDAR_TOOLS, ...DOC_TOOLS, ...RESEARCH_TOOLS];
+const ALL_TOOLS: Tool[] = [
+  ...CALENDAR_TOOLS,
+  ...DOC_TOOLS,
+  ...RESEARCH_TOOLS,
+  ...PAST_YOU_TOOLS,
+];
 const BY_NAME = new Map(ALL_TOOLS.map((t) => [t.name, t] as const));
 
 function expandGroups(groups: ToolGroup[]): Tool[] {
@@ -61,6 +68,10 @@ function expandGroups(groups: ToolGroup[]): Tool[] {
     }
     if (g === "research") {
       RESEARCH_TOOLS.forEach((t) => set.add(t));
+      continue;
+    }
+    if (g === "past-you") {
+      PAST_YOU_TOOLS.forEach((t) => set.add(t));
       continue;
     }
   }

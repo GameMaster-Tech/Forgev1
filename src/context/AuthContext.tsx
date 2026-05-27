@@ -40,9 +40,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (readE2EStub()) return;
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setLoading(false);
+      // Remember each successful sign-in so the multi-account
+      // switcher can list this account on next render. Import is
+      // dynamic so the SSR pass doesn't try to touch localStorage.
+      if (user?.uid && user.email) {
+        try {
+          const { rememberAccount } = await import("@/lib/auth/known-accounts");
+          rememberAccount({
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+          });
+        } catch {
+          /* ignore — module-level storage failure shouldn't kill auth */
+        }
+      }
     });
     return unsubscribe;
   }, []);

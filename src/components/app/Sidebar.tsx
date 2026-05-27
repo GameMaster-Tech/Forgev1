@@ -58,6 +58,7 @@ import { useAuth } from "@/context/AuthContext";
 import { replayTutorial } from "@/components/onboarding/Tutorial";
 import { useRecentChats } from "@/hooks/useRecentChats";
 import { EchoBell } from "@/components/echo/EchoBell";
+import { AccountSwitcher } from "@/components/app/AccountSwitcher";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 const COLLAPSED_W = 56;
@@ -541,33 +542,10 @@ export default function Sidebar({
 
         <div className={`${expanded ? "mt-2 pt-2 border-t border-white/[0.07]" : "h-px bg-white/[0.08] mx-1.5 my-1.5"}`} />
 
-        <Link
-          href="/settings"
-          className={`group relative flex items-center gap-2.5 ${
-            expanded ? "px-1" : "justify-center pt-0.5"
-          }`}
-          aria-label="Account settings"
-        >
-          <div className="w-8 h-8 bg-violet text-white flex items-center justify-center shrink-0">
-            <span className="text-[10px] font-semibold font-display tabular-nums">
-              {initials}
-            </span>
-          </div>
-          {expanded ? (
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-background truncate">
-                {user?.displayName || "Account"}
-              </div>
-              {user?.email ? (
-                <div className="text-[10px] text-background/45 truncate">
-                  {user.email}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <RailTooltip label={user?.displayName || user?.email || "Account"} />
-          )}
-        </Link>
+        {/* Multi-account switcher — replaces the old Link-to-settings
+            avatar. Tap the avatar → dropdown shows current + every
+            other Google account that's signed in on this device. */}
+        <AccountSwitcher expanded={expanded} />
       </div>
     </motion.aside>
   );

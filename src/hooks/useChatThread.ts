@@ -83,12 +83,24 @@ export interface UseChatThreadOptions {
 export interface UseChatThreadApi {
   conversationId: string | null;
   messages: ChatTurn[];
-  send: (text: string) => Promise<void>;
+  /**
+   * Send a message. Optional second arg switches the chat mode:
+   *
+   *   send("…")
+   *   send("…", { mode: "past-you", asOf: "2026-03-14T00:00:00Z" })
+   */
+  send: (text: string, opts?: SendOptions) => Promise<void>;
   sending: boolean;
   loading: boolean;
   error: string | null;
   /** Reset to a fresh thread — used by the "New chat" affordance. */
   reset: () => void;
+}
+
+export interface SendOptions {
+  mode?: "live" | "past-you";
+  /** ISO timestamp — required when mode === "past-you". */
+  asOf?: string;
 }
 
 const MAX_HISTORY_FOR_API = 30;
@@ -213,12 +225,17 @@ export function useChatThread({
   );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: SendOptions) => {
       const trimmed = text.trim();
       if (!trimmed) return;
       const user = auth.currentUser;
       if (!user || !projectId) {
         setError("Sign in and select a project to start chatting.");
+        return;
+      }
+      const mode = opts?.mode ?? "live";
+      if (mode === "past-you" && !opts?.asOf) {
+        setError("Past-You chat needs a date.");
         return;
       }
       setError(null);
@@ -279,6 +296,8 @@ export function useChatThread({
             role: role as "user" | "assistant",
             content,
           })),
+          mode,
+          asOf: opts?.asOf,
           onEvent: (event) => {
             if (event.kind === "thinking") {
               const key = `t${event.turn}:think:${traceCounter++}`;

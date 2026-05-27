@@ -40,6 +40,15 @@ export interface ChatStreamRequest {
   /** Abort signal — lets the caller cancel mid-stream. */
   signal?: AbortSignal;
   onEvent: (event: AgentEvent) => void;
+  /**
+   * "live"     → /api/research/chat/stream — today's assistant.
+   * "past-you" → /api/research/chat/past-you — temporal persona
+   *               speaking as the user as of `asOf`.
+   * Default is "live".
+   */
+  mode?: "live" | "past-you";
+  /** Required when mode === "past-you". ISO timestamp. */
+  asOf?: string;
 }
 
 export interface ChatStreamResult {
@@ -63,7 +72,12 @@ export function useChatStream(): (req: ChatStreamRequest) => Promise<ChatStreamR
     const signal = req.signal ?? controller!.signal;
 
     const headers = await freshAuthHeaders();
-    const res = await fetch("/api/research/chat/stream", {
+    const mode = req.mode ?? "live";
+    const endpoint =
+      mode === "past-you"
+        ? "/api/research/chat/past-you"
+        : "/api/research/chat/stream";
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -72,6 +86,7 @@ export function useChatStream(): (req: ChatStreamRequest) => Promise<ChatStreamR
         userMessage: req.userMessage,
         history: req.history,
         ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),
+        ...(mode === "past-you" && req.asOf ? { asOf: req.asOf } : {}),
       }),
       signal,
     });
