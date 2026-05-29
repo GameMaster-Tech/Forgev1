@@ -23,56 +23,41 @@
 
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { isAuthFailure, requireUser } from "@/lib/server/api-auth";
+import { signState } from "@/lib/server/crypto";
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 
 export async function POST(req: NextRequest): Promise<Response> {
-  const header = req.headers.get("authorization") ?? "";
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
-    return NextResponse.json(
-      { error: "Authorization Bearer token required" },
-      { status: 401 },
-    );
-  }
-  const idToken = match[1].trim();
-  if (!idToken) {
-    return NextResponse.json({ error: "Empty token" }, { status: 401 });
-  }
+  // Verify the caller via the same robust verifier the rest of the app uses
+  // (public-cert ID-token check, with a dev fallback). We deliberately do NOT
+  // use Firebase `createSessionCookie`: that requires a service-account
+  // SIGNING key, which this deployment doesn't provision — and its absence
+  // was silently breaking the Google Calendar OAuth navigation (the cookie
+  // never minted, so /start rejected the redirect as unauthenticated).
+  const auth = await requireUser(req);
+  if (isAuthFailure(auth)) return auth;
 
-  try {
-    // Verify the ID token freshness (rejects stale tokens > 5 min old
-    // per Firebase docs) before minting the session cookie.
-    const decoded = await getAdminAuth().verifyIdToken(idToken, true);
-    const ageSeconds = Math.floor(Date.now() / 1000) - decoded.auth_time;
-    if (ageSeconds > 5 * 60) {
-      return NextResponse.json(
-        { error: "Re-authenticate to issue a session." },
-        { status: 401 },
-      );
-    }
-    const sessionCookie = await getAdminAuth().createSessionCookie(idToken, {
-      expiresIn: FIVE_DAYS_MS,
-    });
-    const res = NextResponse.json({ ok: true });
-    res.cookies.set("__session", sessionCookie, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: FIVE_DAYS_MS / 1000,
-    });
-    return res;
-  } catch (err) {
-    console.error("[auth.session] mint failed", {
-      message: err instanceof Error ? err.message : "unknown",
-    });
-    return NextResponse.json(
-      { error: "Failed to mint session cookie." },
-      { status: 401 },
-    );
-  }
+  // Mint our own HMAC-signed session cookie (OAUTH_STATE_SECRET) carrying the
+  // uid + expiry. `verifyRequest` accepts it as a transport alongside Bearer,
+  // so a top-level navigation (which can't send an Authorization header) can
+  // still authenticate.
+  const expMs = Date.now() + FIVE_DAYS_MS;
+  const sessionCookie = signState({
+    uid: auth.uid,
+    email: auth.email ?? "",
+    exp: String(expMs),
+  });
+
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set("__session", sessionCookie, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: FIVE_DAYS_MS / 1000,
+  });
+  return res;
 }
 
 export async function DELETE(): Promise<Response> {

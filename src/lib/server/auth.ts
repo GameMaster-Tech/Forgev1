@@ -18,6 +18,7 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import { getAdminAuth } from "../firebase/admin";
+import { verifyState } from "./crypto";
 
 export interface VerifiedUser {
   uid: string;
@@ -31,7 +32,10 @@ export async function verifyRequest(req: NextRequest): Promise<VerifiedUser | nu
   const idToken = readIdToken(req);
   if (idToken) {
     try {
-      const decoded = await getAdminAuth().verifyIdToken(idToken, true);
+      // No checkRevoked — that needs privileged backend access (service-account
+      // creds). Public-cert signature verification is enough here and works
+      // without a service account.
+      const decoded = await getAdminAuth().verifyIdToken(idToken);
       return {
         uid: decoded.uid,
         email: decoded.email,
@@ -44,6 +48,14 @@ export async function verifyRequest(req: NextRequest): Promise<VerifiedUser | nu
   }
   const sessionCookie = req.cookies.get("__session")?.value;
   if (sessionCookie) {
+    // Primary: our HMAC-signed session cookie (see /api/auth/session). Does not
+    // depend on Firebase's service-account signing key.
+    const parsed = verifyState(sessionCookie);
+    if (parsed?.uid && parsed.exp && Number(parsed.exp) > Date.now()) {
+      return { uid: parsed.uid, email: parsed.email || undefined };
+    }
+    // Back-compat: a genuine Firebase session cookie (JWT, two dots) if one
+    // was ever minted. Best-effort.
     try {
       const decoded = await getAdminAuth().verifySessionCookie(sessionCookie, true);
       return {
