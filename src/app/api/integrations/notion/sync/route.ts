@@ -61,10 +61,18 @@ import { log } from "@/lib/observability";
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 min — heavy workspaces take time.
 
-const MAX_PAGES = 300;
-const MAX_PROJECTS = 24;
-const MAX_DB_ROWS = 200;
-const MAX_NESTED_DEPTH = 2;
+const MAX_PAGES = intFromEnv("NOTION_SYNC_MAX_ITEMS", 2_000);
+const MAX_PROJECTS = intFromEnv("NOTION_SYNC_MAX_PROJECTS", 200);
+const MAX_DB_ROWS = intFromEnv("NOTION_SYNC_MAX_DB_ROWS", 1_000);
+const MAX_PAGE_BLOCKS = intFromEnv("NOTION_SYNC_MAX_PAGE_BLOCKS", 1_000);
+const MAX_NESTED_DEPTH = intFromEnv("NOTION_SYNC_MAX_NESTED_DEPTH", 4);
+
+function intFromEnv(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 interface RowDataBase {
   userId: string;
@@ -119,8 +127,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   const pages: NotionPage[] = [];
   const databases: NotionDatabase[] = [];
   for (const r of results) {
-    if (r.object === "page" && !r.archived) pages.push(r);
-    else if (r.object === "database" && !r.archived) databases.push(r);
+    if (r.object === "page" && !r.archived && !r.in_trash) pages.push(r);
+    else if (r.object === "database" && !r.archived && !r.in_trash) databases.push(r);
   }
 
   // 2. Figure out top-level "project" pages: workspace-parented pages,
@@ -154,6 +162,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     archivedDocuments: 0,
     durationMs: 0,
   };
+  const seenSyncIds = new Set<string>();
 
   for (const root of projectPages) {
     const title = pageTitle(root.properties);
@@ -163,6 +172,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       title,
       lastEditedTime: root.last_edited_time,
     });
+    seenSyncIds.add(root.id);
     projectByNotionRoot.set(root.id, projectId);
   }
 
@@ -178,13 +188,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       title: "Notion · everything else",
       lastEditedTime: new Date().toISOString(),
     });
+    seenSyncIds.add("notion-misc");
     return fallbackProjectId;
   }
 
   // Map every page id → owning project id. Walk parents until we land
   // on a chosen root.
   const pageById = new Map(pages.map((p) => [p.id, p]));
+  const databaseById = new Map(databases.map((d) => [d.id, d]));
   const projectByPageId = new Map<string, string>();
+  const projectByDatabaseId = new Map<string, string>();
 
   function resolveProject(pageId: string, seen = new Set<string>()): string | null {
     if (seen.has(pageId)) return null;
@@ -200,7 +213,30 @@ export async function POST(req: NextRequest): Promise<Response> {
         return parentResolved;
       }
     }
+    if (page.parent.type === "database_id") {
+      const dbResolved = resolveDatabaseProject(page.parent.database_id, seen);
+      if (dbResolved) {
+        projectByPageId.set(pageId, dbResolved);
+        return dbResolved;
+      }
+    }
     return null;
+  }
+
+  function resolveDatabaseProject(databaseId: string, seen = new Set<string>()): string | null {
+    if (seen.has(databaseId)) return null;
+    seen.add(databaseId);
+    if (projectByDatabaseId.has(databaseId)) return projectByDatabaseId.get(databaseId)!;
+    const db = databaseById.get(databaseId);
+    if (!db) return null;
+    let resolved: string | null = null;
+    if (db.parent.type === "page_id") {
+      resolved = resolveProject(db.parent.page_id);
+    } else if (db.parent.type === "database_id") {
+      resolved = resolveDatabaseProject(db.parent.database_id, seen);
+    }
+    if (resolved) projectByDatabaseId.set(databaseId, resolved);
+    return resolved;
   }
 
   // 4. Sync every non-database page as a Forge document.
@@ -214,6 +250,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         page,
         token,
       });
+      seenSyncIds.add(page.id);
       stats.upsertedDocuments += 1;
     } catch (err) {
       log.error(err, { route: "notion.sync.page", uid: uid, pageId: page.id });
@@ -232,15 +269,18 @@ export async function POST(req: NextRequest): Promise<Response> {
         projectId: ownerProjectId,
         db,
         token,
+        seenSyncIds,
       });
       stats.upsertedEvents += dbStats.events;
       stats.upsertedDataTables += dbStats.tables;
+      stats.upsertedDocuments += dbStats.documents;
     } catch (err) {
       log.error(err, { route: "notion.sync.db", uid: uid, dbId: db.id });
     }
   }
 
   stats.createdProjects = projectByNotionRoot.size + (fallbackProjectId ? 1 : 0);
+  stats.archivedDocuments = await archiveMissingNotionRows(uid, seenSyncIds);
   stats.durationMs = Date.now() - t0;
 
   await intRef.set(
@@ -289,22 +329,36 @@ async function upsertProject(args: {
       },
       { merge: true },
     );
-    return projectId;
+  } else {
+    await ref.set({
+      userId: args.uid,
+      name: args.title,
+      mode: "reasoning",
+      systemInstructions: "",
+      queryCount: 0,
+      docCount: 0,
+      status: "active",
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      notionRootId: args.notionRootId,
+      notionLastEditedTime: args.lastEditedTime,
+      source: "notion",
+    });
   }
-  await ref.set({
-    userId: args.uid,
-    name: args.title,
-    mode: "reasoning",
-    systemInstructions: "",
-    queryCount: 0,
-    docCount: 0,
-    status: "active",
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-    notionRootId: args.notionRootId,
-    notionLastEditedTime: args.lastEditedTime,
-    source: "notion",
-  });
+  await fs.doc(`users/${args.uid}/notion_pages/${args.notionRootId}`).set(
+    {
+      pageId: args.notionRootId,
+      parentId: null,
+      kind: "project_root",
+      forgeProjectId: projectId,
+      forgeDocumentId: null,
+      title: args.title,
+      lastEditedTime: args.lastEditedTime,
+      syncedAt: Date.now(),
+      archived: false,
+    } satisfies NotionPageSyncRow,
+    { merge: true },
+  );
   return projectId;
 }
 
@@ -331,7 +385,13 @@ async function upsertPageDocument(args: {
         title,
         content: html,
         wordCount: countWords(html),
+        status: "active",
+        archived: false,
         updatedAt: FieldValue.serverTimestamp(),
+        notionPageId: args.page.id,
+        notionLastEditedTime: args.page.last_edited_time,
+        notionUrl: args.page.url,
+        source: "notion",
       },
       { merge: true },
     );
@@ -350,6 +410,10 @@ async function upsertPageDocument(args: {
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       notionPageId: args.page.id,
+      notionLastEditedTime: args.page.last_edited_time,
+      notionUrl: args.page.url,
+      status: "active",
+      archived: false,
       source: "notion",
     });
   }
@@ -372,7 +436,7 @@ async function upsertPageDocument(args: {
 }
 
 async function renderPageHtml(token: string, pageId: string): Promise<string> {
-  const root = await listBlockChildren(token, pageId, 500).catch(() => []);
+  const root = await listBlockChildren(token, pageId, MAX_PAGE_BLOCKS).catch(() => []);
   if (root.length === 0) return "";
   const childrenByParent = new Map<string, NotionBlock[]>();
   // One extra recursion for blocks marked has_children (lists, toggles,
@@ -411,7 +475,8 @@ async function syncDatabase(args: {
   projectId: string;
   db: NotionDatabase;
   token: string;
-}): Promise<{ events: number; tables: number }> {
+  seenSyncIds: Set<string>;
+}): Promise<{ events: number; tables: number; documents: number }> {
   // Some databases come back without expanded schema in `search`;
   // fetch the full definition once.
   let database = args.db;
@@ -431,6 +496,7 @@ async function syncDatabase(args: {
   const rows = await queryDatabase(args.token, database.id, MAX_DB_ROWS).catch(
     () => [] as NotionPage[],
   );
+  args.seenSyncIds.add(database.id);
 
   if (dateProps.length > 0) {
     // Calendar database → write each row as a calendar event in the
@@ -439,8 +505,19 @@ async function syncDatabase(args: {
     // now filters on externalSource so both sources can coexist.
     const dateKey = dateProps[0][0];
     let events = 0;
+    let documents = 0;
     for (const row of rows) {
-      if (row.archived) continue;
+      if (row.archived || row.in_trash) continue;
+      if (!args.seenSyncIds.has(row.id)) {
+        await upsertPageDocument({
+          uid: args.uid,
+          projectId: args.projectId,
+          page: row,
+          token: args.token,
+        });
+        documents += 1;
+      }
+      args.seenSyncIds.add(row.id);
       const date = row.properties[dateKey]?.date;
       if (!date?.start) continue;
       await upsertNotionEvent({
@@ -453,7 +530,22 @@ async function syncDatabase(args: {
       });
       events += 1;
     }
-    return { events, tables: 0 };
+    return { events, tables: 0, documents };
+  }
+
+  let documents = 0;
+  for (const row of rows) {
+    if (row.archived || row.in_trash) continue;
+    if (!args.seenSyncIds.has(row.id)) {
+      await upsertPageDocument({
+        uid: args.uid,
+        projectId: args.projectId,
+        page: row,
+        token: args.token,
+      });
+      documents += 1;
+    }
+    args.seenSyncIds.add(row.id);
   }
 
   // Non-date database → render as a single Forge document with a
@@ -467,7 +559,7 @@ async function syncDatabase(args: {
     html,
     lastEditedTime: database.last_edited_time,
   });
-  return { events: 0, tables: 1 };
+  return { events: 0, tables: 1, documents };
 }
 
 async function upsertNotionEvent(args: {
@@ -480,8 +572,7 @@ async function upsertNotionEvent(args: {
 }): Promise<void> {
   const fs = getAdminFirestore();
   const title = pageTitle(args.row.properties) || args.dbTitle;
-  const start = args.date.start;
-  const end = args.date.end ?? args.date.start;
+  const { start, end, allDay, timeZone } = normalizeNotionDate(args.date);
 
   // Deterministic event id so re-syncs upsert rather than duplicating.
   const eventId = `notion_${args.row.id.replace(/-/g, "")}`.slice(0, 60);
@@ -495,6 +586,8 @@ async function upsertNotionEvent(args: {
     externalSource: "notion";
     externalId: string;
     description?: string;
+    allDay: boolean;
+    timeZone?: string;
     notionDbId: string;
     notionDbTitle: string;
   } = {
@@ -507,14 +600,33 @@ async function upsertNotionEvent(args: {
     title,
     start,
     end,
+    allDay,
     eventKind: "meeting",
     externalSource: "notion",
     externalId: args.row.id,
     notionDbId: args.dbId,
     notionDbTitle: args.dbTitle,
   };
+  if (timeZone) body.timeZone = timeZone;
   if (args.row.url) body.description = `Imported from Notion · ${args.row.url}`;
   await ref.set(body, { merge: true });
+  const syncRef = fs.doc(`users/${args.uid}/notion_pages/${args.row.id}`);
+  const existingSync = (await syncRef.get()).data() as NotionPageSyncRow | undefined;
+  await syncRef.set(
+    {
+      pageId: args.row.id,
+      parentId: args.dbId,
+      kind: "database_row",
+      forgeProjectId: args.projectId,
+      forgeDocumentId: existingSync?.forgeDocumentId ?? null,
+      forgeEventId: eventId,
+      title,
+      lastEditedTime: args.row.last_edited_time,
+      syncedAt: Date.now(),
+      archived: args.row.archived || args.row.in_trash,
+    } satisfies NotionPageSyncRow,
+    { merge: true },
+  );
 }
 
 async function upsertDatabaseDocument(args: {
@@ -536,6 +648,8 @@ async function upsertDatabaseDocument(args: {
         title: args.title,
         content: args.html,
         wordCount: countWords(args.html),
+        status: "active",
+        archived: false,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -555,6 +669,9 @@ async function upsertDatabaseDocument(args: {
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       notionPageId: args.dbId,
+      notionLastEditedTime: args.lastEditedTime,
+      status: "active",
+      archived: false,
       source: "notion-database",
     });
   }
@@ -574,6 +691,84 @@ async function upsertDatabaseDocument(args: {
   );
 }
 
+async function archiveMissingNotionRows(
+  uid: string,
+  seenSyncIds: Set<string>,
+): Promise<number> {
+  const fs = getAdminFirestore();
+  const snap = await fs.collection(`users/${uid}/notion_pages`).get();
+  let archived = 0;
+  let batch = fs.batch();
+  let writes = 0;
+
+  async function commitIfNeeded(force = false) {
+    if (writes === 0 || (!force && writes < 400)) return;
+    await batch.commit();
+    batch = fs.batch();
+    writes = 0;
+  }
+
+  for (const docSnap of snap.docs) {
+    const row = docSnap.data() as NotionPageSyncRow;
+    if (row.archived || seenSyncIds.has(docSnap.id)) continue;
+
+    batch.set(
+      docSnap.ref,
+      {
+        archived: true,
+        syncedAt: Date.now(),
+        archivedAt: Date.now(),
+      },
+      { merge: true },
+    );
+    writes += 1;
+
+    if (row.forgeDocumentId) {
+      batch.set(
+        fs.doc(`documents/${row.forgeDocumentId}`),
+        {
+          status: "archived",
+          archived: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      writes += 1;
+      archived += 1;
+    }
+
+    if (row.forgeEventId) {
+      batch.set(
+        fs.doc(`users/${uid}/google_events/${row.forgeEventId}`),
+        {
+          archived: true,
+          status: "cancelled",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      writes += 1;
+    }
+
+    if (row.kind === "project_root") {
+      batch.set(
+        fs.doc(`projects/${row.forgeProjectId}`),
+        {
+          status: "archived",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      writes += 1;
+    }
+
+    await commitIfNeeded();
+  }
+
+  await commitIfNeeded(true);
+  return archived;
+}
+
 function renderDatabaseAsList(title: string, rows: NotionPage[]): string {
   const items = rows
     .filter((r) => !r.archived)
@@ -587,6 +782,32 @@ function renderDatabaseAsList(title: string, rows: NotionPage[]): string {
 }
 
 /* ─────────────────────────── helpers ─────────────────────────── */
+
+function normalizeNotionDate(
+  date: NonNullable<NotionPage["properties"][string]["date"]>,
+): { start: string; end: string; allDay: boolean; timeZone?: string } {
+  const allDay = isDateOnly(date.start);
+  const start = date.start;
+  const end = date.end ?? defaultNotionEnd(date.start, allDay);
+  return {
+    start,
+    end,
+    allDay,
+    ...(date.time_zone ? { timeZone: date.time_zone } : {}),
+  };
+}
+
+function defaultNotionEnd(start: string, allDay: boolean): string {
+  if (!allDay) return start;
+  const parsed = new Date(`${start}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return start;
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function isDateOnly(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
 
 function countWords(html: string): number {
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

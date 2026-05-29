@@ -28,6 +28,7 @@ import {
   type FirestoreMessage,
 } from "@/lib/firebase/conversations";
 import { useChatStream } from "./useChatStream";
+import type { AiMode } from "@/lib/ai/models";
 
 export interface ChatTurn {
   id: string;
@@ -70,7 +71,7 @@ export interface LiveTraceItem {
 }
 
 export interface UseChatThreadOptions {
-  /** Currently active project id; required for chat persistence. */
+  /** Active project id. Null means workspace-wide chat. */
   projectId: string | null;
   /** Display name of the project — sent to the model as context. */
   projectName?: string | null;
@@ -78,6 +79,8 @@ export interface UseChatThreadOptions {
   initialConversationId?: string | null;
   /** Override the default model — passes through to `createConversation`. */
   modelId?: string;
+  aiMode?: AiMode;
+  showTrace?: boolean;
 }
 
 export interface UseChatThreadApi {
@@ -104,28 +107,7 @@ export interface SendOptions {
 }
 
 const MAX_HISTORY_FOR_API = 30;
-
-/**
- * Force-refresh the Firebase ID token before each chat send.
- *
- * Why force: `getIdToken()` returns a cached token that may have
- * expired (>1h) even though the SDK believes the user is logged in.
- * When the server calls `verifyIdToken(token, true)` with the
- * checkRevoked flag the stale token fails with "Invalid or expired
- * token" — exactly the error the user saw. Passing `true` here
- * triggers a refresh against Google's STS so the server always sees a
- * fresh token.
- */
-async function authHeaders(): Promise<Record<string, string>> {
-  const user = auth.currentUser;
-  if (!user) return {};
-  try {
-    const token = await user.getIdToken(true);
-    return { Authorization: `Bearer ${token}` };
-  } catch {
-    return {};
-  }
-}
+const GLOBAL_CHAT_PROJECT_ID = "__forge_ai_chat__";
 
 function turnFromMessage(m: FirestoreMessage): ChatTurn {
   return {
@@ -150,6 +132,8 @@ export function useChatThread({
   projectName,
   initialConversationId,
   modelId = "llama-3.3-70b-versatile",
+  aiMode = "standard",
+  showTrace = false,
 }: UseChatThreadOptions): UseChatThreadApi {
   const [conversationId, setConversationId] = useState<string | null>(
     initialConversationId ?? null,
@@ -204,14 +188,15 @@ export function useChatThread({
       if (conversationId) return conversationId;
       if (creatingRef.current) return creatingRef.current;
       const user = auth.currentUser;
-      if (!user || !projectId) {
-        throw new Error("Sign in and select a project to start chatting.");
+      if (!user) {
+        throw new Error("Sign in to start chatting.");
       }
+      const storageProjectId = projectId ?? GLOBAL_CHAT_PROJECT_ID;
       const titleSeed = firstUserContent.slice(0, 60);
       const promise = createConversation(user.uid, {
-        projectId,
+        projectId: storageProjectId,
         title: titleSeed,
-        mode: "reasoning",
+        mode: aiMode === "standard" ? "lightning" : aiMode === "thinking" ? "reasoning" : "deep",
         modelId,
       }).then((id) => {
         setConversationId(id);
@@ -221,7 +206,7 @@ export function useChatThread({
       creatingRef.current = promise;
       return promise;
     },
-    [conversationId, projectId, modelId],
+    [conversationId, projectId, modelId, aiMode],
   );
 
   const send = useCallback(
@@ -229,10 +214,11 @@ export function useChatThread({
       const trimmed = text.trim();
       if (!trimmed) return;
       const user = auth.currentUser;
-      if (!user || !projectId) {
-        setError("Sign in and select a project to start chatting.");
+      if (!user) {
+        setError("Sign in to start chatting.");
         return;
       }
+      const storageProjectId = projectId ?? GLOBAL_CHAT_PROJECT_ID;
       const mode = opts?.mode ?? "live";
       if (mode === "past-you" && !opts?.asOf) {
         setError("Past-You chat needs a date.");
@@ -263,7 +249,7 @@ export function useChatThread({
         // the assistant call fails halfway through.
         const persistedUserId = await appendMessage(convoId, {
           userId: user.uid,
-          projectId,
+          projectId: storageProjectId,
           role: "user",
           content: trimmed,
         });
@@ -290,6 +276,8 @@ export function useChatThread({
         const result = await streamAgent({
           projectId,
           projectName: projectName ?? null,
+          modelId,
+          aiMode,
           userMessage: trimmed,
           // Filter out system turns — the API only accepts user / assistant.
           history: history.map(({ role, content }) => ({
@@ -300,6 +288,7 @@ export function useChatThread({
           asOf: opts?.asOf,
           onEvent: (event) => {
             if (event.kind === "thinking") {
+              if (!showTrace) return;
               const key = `t${event.turn}:think:${traceCounter++}`;
               setMessages((prev) =>
                 prev.map((m) =>
@@ -323,6 +312,7 @@ export function useChatThread({
               return;
             }
             if (event.kind === "tool_start") {
+              if (!showTrace) return;
               const key = `t${event.turn}:${event.tool}:${traceCounter++}`;
               setMessages((prev) =>
                 prev.map((m) => {
@@ -362,6 +352,7 @@ export function useChatThread({
               return;
             }
             if (event.kind === "tool_done") {
+              if (!showTrace) return;
               setMessages((prev) =>
                 prev.map((m) => {
                   if (m.id !== assistantTurn.id) return m;
@@ -384,6 +375,7 @@ export function useChatThread({
               return;
             }
             if (event.kind === "error") {
+              if (!showTrace) return;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantTurn.id
@@ -416,7 +408,7 @@ export function useChatThread({
 
         const persistedAssistantId = await appendMessage(convoId, {
           userId: user.uid,
-          projectId,
+          projectId: storageProjectId,
           role: "assistant",
           content: reply,
           modelId,
@@ -450,7 +442,7 @@ export function useChatThread({
         setSending(false);
       }
     },
-    [projectId, projectName, ensureConversation, messages, modelId, streamAgent, setMessages],
+    [projectId, projectName, ensureConversation, messages, modelId, aiMode, showTrace, streamAgent, setMessages],
   );
 
   /**

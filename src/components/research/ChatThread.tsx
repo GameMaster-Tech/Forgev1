@@ -43,6 +43,7 @@ import {
   Sparkles,
   Target,
   Wand2,
+  type LucideIcon,
 } from "lucide-react";
 import { Markdown } from "./Markdown";
 import type { LiveTraceItem } from "@/hooks/useChatThread";
@@ -54,12 +55,35 @@ import {
   type ComposerAction,
 } from "./ComposerCommandsMenu";
 import type { WorkspaceRef } from "@/hooks/useWorkspaceRefs";
+import type { AiMode, AiModelOption } from "@/lib/ai/models";
+import { GROQ_MODELS, modeLabel } from "@/lib/ai/models";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
-const MODEL_LABEL = "llama-3.3-70b";
+const FALLBACK_MODEL_LABEL = "Llama 3.3 70B";
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  thinking: Brain,
+  research_search: SearchIcon,
+  research_answer: SearchIcon,
+  docs_list: ListChecks,
+  docs_read: BookOpen,
+  docs_create: FileText,
+  docs_update: FileText,
+  calendar_list_events: CalendarIcon,
+  calendar_create_event: CalendarIcon,
+  calendar_update_event: CalendarIcon,
+  calendar_delete_event: CalendarIcon,
+  tasks_list: ListChecks,
+  tasks_create: ListChecks,
+  habits_create: Rocket,
+  goals_create: Target,
+  error: Wand2,
+};
 
 export interface ChatThreadHandle {
   focus: () => void;
+  /** Seed the composer with text (e.g. from a ⌘K "Ask Forge" hand-off)
+   * and focus it — without auto-sending, so the user reviews first. */
+  prefill: (text: string) => void;
 }
 
 interface ChatThreadProps {
@@ -78,17 +102,29 @@ interface ChatThreadProps {
   ) => Promise<void>;
   onReset: () => void;
   projectName?: string | null;
+  modelOptions: AiModelOption[];
+  selectedModelId: string;
+  aiMode: AiMode;
+  onModelChange: (modelId: string) => void;
+  onAiModeChange: (mode: AiMode) => void;
 }
-
-const SUGGESTED_PROMPTS: string[] = [
-  "Summarise what this project is about so far.",
-  "What sources should I read next? Suggest five with one-line reasons.",
-  "What's the strongest counter-argument to my main claim?",
-];
 
 export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
   function ChatThread(
-    { messages, sending, loading, error, onSend, onReset, projectName },
+    {
+      messages,
+      sending,
+      loading,
+      error,
+      onSend,
+      onReset,
+      projectName,
+      modelOptions = GROQ_MODELS,
+      selectedModelId = "llama-3.3-70b-versatile",
+      aiMode = "standard",
+      onModelChange = () => {},
+      onAiModeChange = () => {},
+    },
     ref,
   ) {
     const [draft, setDraft] = useState("");
@@ -109,6 +145,13 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     // pickRef adds visible `@<Title>` token text + remembers the doc
     // id so the chat route can resolve it server-side.
     const { projectId: activeProjectId } = useActiveProject();
+    const safeModelOptions = modelOptions.length > 0 ? modelOptions : GROQ_MODELS;
+    const selectedModel = useMemo(
+      () => safeModelOptions.find((m) => m.id === selectedModelId) ?? safeModelOptions[0],
+      [safeModelOptions, selectedModelId],
+    );
+    const modelLabel = selectedModel?.label ?? FALLBACK_MODEL_LABEL;
+    const availableModes = selectedModel?.modes ?? ["standard"];
     const cmd = useComposerCommands({
       textareaRef: composerRef,
       value: draft,
@@ -119,11 +162,17 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     // Reset hovered row whenever the trigger changes so we never
     // open a fresh popover with a stale highlight.
     useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveIndex(0);
     }, [cmd.state?.trigger]);
 
     useImperativeHandle(ref, () => ({
       focus: () => composerRef.current?.focus(),
+      prefill: (text: string) => {
+        setDraft(text);
+        // Focus on the next frame so the autosize layout effect has run.
+        requestAnimationFrame(() => composerRef.current?.focus());
+      },
     }));
 
     // Autosize the textarea up to ~6 lines, then scroll inside.
@@ -273,12 +322,12 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     const empty = visible.length === 0;
 
     return (
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col bg-background">
         {/* Quiet status strip — only shows once the thread has content. */}
         {!empty ? (
-          <div className="flex items-center gap-2 px-6 sm:px-10 py-3">
+          <div className="flex items-center gap-2 px-5 sm:px-8 py-3 border-b border-border/50">
             <span className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium">
-              Chat · {visible.length} turn{visible.length === 1 ? "" : "s"}
+              {visible.length} turn{visible.length === 1 ? "" : "s"}
             </span>
             <button
               type="button"
@@ -296,16 +345,16 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
           ref={scrollerRef}
           className="flex-1 min-h-0 overflow-y-auto bg-background"
         >
-          <div className="max-w-[680px] mx-auto px-6 sm:px-10 py-10">
+          <div className="max-w-[760px] mx-auto px-5 sm:px-8 py-10">
             {loading ? (
               <LoadingState />
             ) : empty ? (
-              <EmptyState projectName={projectName} onPrompt={submit} />
+              <EmptyState projectName={projectName} />
             ) : (
               <ol className="space-y-10">
                 <AnimatePresence initial={false}>
                   {visible.map((m) => (
-                    <Turn key={m.id} turn={m} />
+                    <Turn key={m.id} turn={m} modelLabel={modelLabel} />
                   ))}
                 </AnimatePresence>
               </ol>
@@ -323,7 +372,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
             violet outline so typing doesn't paint a blue block. */}
         <form
           onSubmit={handleSubmit}
-          className="composer-bare border-t border-border bg-background relative"
+          className="composer-bare border-t border-border bg-background/95 backdrop-blur relative"
         >
           {/* @ / / / # picker — absolute, anchored above the composer. */}
           {cmd.state ? (
@@ -337,8 +386,8 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
               onClose={cmd.close}
             />
           ) : null}
-          <div className="max-w-[680px] mx-auto px-6 sm:px-10 py-4">
-            <div className="flex items-end gap-3">
+          <div className="max-w-[760px] mx-auto px-5 sm:px-8 py-4">
+            <div className="flex items-end gap-3 rounded-2xl border border-border bg-surface/40 px-4 py-2 focus-within:border-violet/50 transition-colors shadow-[0_18px_60px_-42px_rgba(0,0,0,0.45)]">
               <label htmlFor="forge-chat-composer" className="sr-only">
                 Chat message
               </label>
@@ -367,7 +416,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                       : "Forge is responding…"
                     : pastYouOn
                       ? `Ask past-you (as of ${pastYouAsOf}) anything…`
-                      : "Ask anything"
+                      : "Message Forge"
                 }
                 rows={1}
                 disabled={sending}
@@ -378,7 +427,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
               <button
                 type="submit"
                 disabled={!draft.trim() || sending}
-                className="shrink-0 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-violet hover:text-foreground disabled:text-muted/50 transition-colors py-2"
+                className="shrink-0 inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-full bg-foreground text-background hover:bg-violet disabled:bg-muted/20 disabled:text-muted/60 text-[10px] uppercase tracking-[0.14em] font-semibold transition-colors"
               >
                 Send
                 <ArrowRight
@@ -392,8 +441,47 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 add inline so the feature stays discoverable without
                 its own modal. Active state replaces the placeholder
                 so the user sees who they're talking to. */}
-            <div className="mt-1.5 flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-muted font-medium flex-wrap">
-              <span className="tabular-nums">{MODEL_LABEL}</span>
+            <div className="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-muted font-medium flex-wrap">
+              <select
+                value={selectedModelId}
+                onChange={(e) => onModelChange(e.target.value)}
+                disabled={sending}
+                aria-label="AI model"
+                className="bg-transparent border border-border px-1.5 py-1 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-foreground focus:outline-none focus:border-violet/50 disabled:opacity-50"
+              >
+                {safeModelOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-border">/</span>
+              <div className="inline-flex items-center border border-border">
+                {(["standard", "thinking", "reasoning"] as AiMode[]).map((mode) => {
+                  const supported = availableModes.includes(mode);
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={!supported || sending}
+                      onClick={() => onAiModeChange(mode)}
+                      aria-pressed={aiMode === mode}
+                      title={
+                        supported
+                          ? `${modeLabel(mode)} mode`
+                          : `${modelLabel} does not support ${modeLabel(mode)} mode`
+                      }
+                      className={`px-2 py-1 transition-colors ${
+                        aiMode === mode && supported
+                          ? "bg-foreground text-background"
+                          : "text-muted hover:text-foreground disabled:opacity-35 disabled:hover:text-muted"
+                      }`}
+                    >
+                      {modeLabel(mode)}
+                    </button>
+                  );
+                })}
+              </div>
               <span className="text-border">/</span>
               <span>Enter sends · Shift + Enter newline</span>
               <span className="text-border ml-auto">·</span>
@@ -433,7 +521,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
 
 /* ────── single turn ────── */
 
-function Turn({ turn }: { turn: ChatTurn }) {
+function Turn({ turn, modelLabel }: { turn: ChatTurn; modelLabel: string }) {
   const isUser = turn.role === "user";
   const time = new Date(turn.createdAt).toLocaleTimeString([], {
     hour: "numeric",
@@ -469,7 +557,7 @@ function Turn({ turn }: { turn: ChatTurn }) {
         </span>
         {!isUser ? (
           <span className="text-[10px] uppercase tracking-[0.12em] text-muted/70 font-medium">
-            · {MODEL_LABEL}
+            · {modelLabel}
           </span>
         ) : null}
         {turn.pending ? <ThinkingPulse /> : null}
@@ -556,64 +644,34 @@ function LoadingState() {
 
 function EmptyState({
   projectName,
-  onPrompt,
 }: {
   projectName?: string | null;
-  onPrompt: (text: string) => void;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: EASE }}
-      className="py-12"
+      className="min-h-[54vh] flex flex-col items-center justify-center text-center py-12"
     >
-      <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-5 flex items-center gap-2">
-        <Sparkles size={11} strokeWidth={2} className="text-violet" />
-        Chat
-      </p>
-      <h1 className="font-display font-extrabold text-3xl sm:text-[2.25rem] text-foreground tracking-[-0.025em] leading-[1.1] mb-3">
+      <div className="mb-5 h-9 w-9 rounded-full border border-border bg-surface/50 flex items-center justify-center">
+        <Sparkles size={15} strokeWidth={2} className="text-violet" />
+      </div>
+      <h1 className="font-display font-semibold text-2xl sm:text-[2rem] text-foreground tracking-[-0.025em] leading-[1.12] mb-3">
         {projectName ? (
           <>
-            What do you want to figure out about{" "}
+            Ask about{" "}
             <span className="text-violet">{projectName}</span>?
           </>
         ) : (
-          <>What do you want to figure out?</>
+          <>How can Forge help?</>
         )}
       </h1>
-      <p className="text-[13px] text-muted leading-relaxed max-w-md mb-8">
-        Forge keeps the whole conversation in context. Ask follow-ups,
-        cite sources, save what&apos;s useful.
+      <p className="text-[13px] text-muted leading-relaxed max-w-sm">
+        Use <span className="text-foreground">@</span> for docs,{" "}
+        <span className="text-foreground">#</span> for web search, and{" "}
+        <span className="text-foreground">/</span> for actions.
       </p>
-      <ul className="space-y-2">
-        {SUGGESTED_PROMPTS.map((p, i) => (
-          <motion.li
-            key={p}
-            initial={{ opacity: 0, x: -4 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.22, ease: EASE, delay: 0.08 + i * 0.04 }}
-          >
-            <button
-              type="button"
-              onClick={() => onPrompt(p)}
-              className="group w-full text-left flex items-start gap-3 py-2 border-t border-border first:border-t-0 hover:bg-violet/[0.04] transition-colors -mx-2 px-2"
-            >
-              <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted group-hover:text-violet transition-colors mt-0.5 tabular-nums">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="flex-1 text-[14px] text-foreground/85 leading-snug group-hover:text-foreground transition-colors">
-                {p}
-              </span>
-              <ArrowRight
-                size={12}
-                strokeWidth={2}
-                className="text-muted opacity-0 group-hover:opacity-100 group-hover:text-violet transition-all mt-1"
-              />
-            </button>
-          </motion.li>
-        ))}
-      </ul>
     </motion.div>
   );
 }
@@ -652,7 +710,7 @@ function LiveTrace({ items }: { items: LiveTraceItem[] }) {
 }
 
 function TraceRow({ item }: { item: LiveTraceItem }) {
-  const Icon = iconForTool(item.tool);
+  const Icon = TOOL_ICONS[item.tool] ?? Sparkles;
   const tone = item.errored
     ? "text-rose"
     : item.inflight
@@ -716,39 +774,6 @@ function TraceRow({ item }: { item: LiveTraceItem }) {
       </div>
     </div>
   );
-}
-
-function iconForTool(tool: string) {
-  switch (tool) {
-    case "thinking":
-      return Brain;
-    case "research_search":
-    case "research_answer":
-      return SearchIcon;
-    case "docs_list":
-      return ListChecks;
-    case "docs_read":
-      return BookOpen;
-    case "docs_create":
-    case "docs_update":
-      return FileText;
-    case "calendar_list_events":
-    case "calendar_create_event":
-    case "calendar_update_event":
-    case "calendar_delete_event":
-      return CalendarIcon;
-    case "tasks_list":
-    case "tasks_create":
-      return ListChecks;
-    case "habits_create":
-      return Rocket;
-    case "goals_create":
-      return Target;
-    case "error":
-      return Wand2;
-    default:
-      return Sparkles;
-  }
 }
 
 function hostnameOf(url: string): string {

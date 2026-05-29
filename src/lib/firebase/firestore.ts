@@ -2,7 +2,6 @@ import {
   collection,
   doc,
   addDoc,
-  setDoc,
   updateDoc,
   deleteDoc,
   getDocs,
@@ -10,6 +9,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   serverTimestamp,
   arrayUnion,
   arrayRemove,
@@ -271,6 +271,30 @@ export async function getProjectDocuments(projectId: string, userId?: string) {
       console.warn(
         "Firestore permission denied on documents query. Make sure userId filter is included and rules are deployed.",
       );
+      return [];
+    }
+    if (isFirebaseOfflineError(err)) {
+      console.warn(firebaseReadErrorMessage(err));
+      return [];
+    }
+    throw new Error(firebaseReadErrorMessage(err));
+  }
+}
+
+export async function getUserDocuments(userId: string, limitCount = 80) {
+  try {
+    const q = query(
+      collection(db, "documents"),
+      where("userId", "==", userId),
+      orderBy("updatedAt", "desc"),
+      limit(limitCount),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument));
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code ?? "";
+    if (code === "failed-precondition" || code === "permission-denied") {
+      console.warn("Firestore user documents query unavailable for @ references.");
       return [];
     }
     if (isFirebaseOfflineError(err)) {

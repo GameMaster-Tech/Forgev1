@@ -26,7 +26,7 @@ import {
   rateLimitResponse,
   RATE_LIMIT_EXPENSIVE,
 } from "@/lib/server/rate-limit";
-import { groqChat, FAST_MODEL } from "@/lib/ai/groq";
+import { groqChat, FAST_MODEL, GroqApiError } from "@/lib/ai/groq";
 
 const MAX_BLOCK_CHARS = 6_000;
 
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
           content: `Block A:\n"""${proseA}"""\n\nBlock B:\n"""${proseB}"""\n\nRespond with JSON only.`,
         },
       ],
-      maxTokens: 256,
+      maxCompletionTokens: 256,
       temperature: 0.1,
       jsonResponse: true,
       timeoutMs: 15_000,
@@ -90,7 +90,12 @@ export async function POST(request: Request) {
     console.error("[forge-graph.semantic-check] upstream failure", {
       message: err instanceof Error ? err.message : "unknown",
     });
-    return Response.json({ conflict: false, reason: "" }, { status: 200 });
+    const message = err instanceof Error ? err.message : "unknown";
+    const status = err instanceof GroqApiError ? err.status : 0;
+    return Response.json(
+      { conflict: false, reason: "", error: `Upstream: ${message}` },
+      { status: status === 0 ? 502 : status },
+    );
   }
 }
 

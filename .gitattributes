@@ -1,0 +1,20 @@
+# Normalize line endings and treat source as UTF-8 text.
+* text=auto eol=lf
+
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+
+# Binary assets — never normalize.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
+*.ico  binary

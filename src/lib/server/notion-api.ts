@@ -27,7 +27,7 @@ import type {
 } from "@/lib/integrations/notion/types";
 
 const NOTION_API = "https://api.notion.com/v1";
-const NOTION_VERSION = "2022-06-28";
+const NOTION_VERSION = process.env.NOTION_API_VERSION ?? "2022-06-28";
 const OAUTH_TOKEN_URL = `${NOTION_API}/oauth/token`;
 const REVOKE_URL = `${NOTION_API}/oauth/revoke`;
 

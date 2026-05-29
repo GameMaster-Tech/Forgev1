@@ -48,11 +48,38 @@
  */
 
 import "server-only";
+import tls from "node:tls";
+
+installSystemCertificatesForNodeFetch();
 
 export const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 export const FAST_MODEL = "llama-3.1-8b-instant";
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+function installSystemCertificatesForNodeFetch(): void {
+  const tlsWithSystemCa = tls as typeof tls & {
+    getCACertificates?: (type?: "default" | "system" | "bundled" | "extra") => string[];
+    setDefaultCACertificates?: (certs: string[]) => void;
+  };
+  if (!tlsWithSystemCa.getCACertificates || !tlsWithSystemCa.setDefaultCACertificates) {
+    return;
+  }
+  try {
+    const current = tlsWithSystemCa.getCACertificates("default");
+    const system = tlsWithSystemCa.getCACertificates("system");
+    if (system.length === 0) return;
+    const merged = Array.from(new Set([...current, ...system]));
+    if (merged.length > current.length) {
+      tlsWithSystemCa.setDefaultCACertificates(merged);
+    }
+  } catch (err) {
+    console.warn(
+      "[groq] could not install system CA certificates:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -116,6 +143,8 @@ export interface GroqRequest {
   temperature?: number;
   topP?: number;
   jsonResponse?: boolean;
+  reasoningEffort?: "none" | "default" | "low" | "medium" | "high";
+  reasoningFormat?: "hidden" | "parsed";
   tools?: ToolDefinition[];
   toolChoice?: ToolChoice;
   timeoutMs?: number;
@@ -213,11 +242,12 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
     model,
     messages: messages.map(serializeMessage),
     max_completion_tokens: maxTokens,
-    max_tokens: maxTokens,
     temperature,
   };
   if (typeof req.topP === "number") body.top_p = req.topP;
   if (req.jsonResponse) body.response_format = { type: "json_object" };
+  if (req.reasoningEffort) body.reasoning_effort = req.reasoningEffort;
+  if (req.reasoningFormat) body.reasoning_format = req.reasoningFormat;
   if (req.tools && req.tools.length > 0) {
     body.tools = req.tools;
     body.tool_choice = req.toolChoice ?? "auto";
@@ -225,22 +255,72 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
   // Streaming + tools combine fine on the wire, but the tool-call
   // path needs the full assembled response anyway — so we only ask
   // for stream:true when the caller actually subscribed to deltas.
-  if (wantsStream) body.stream = true;
+  if (wantsStream) {
+    body.stream = true;
+    body.stream_options = { include_usage: true };
+  }
 
   console.log(
     `[groq] → POST ${ENDPOINT} model=${model} messages=${messages.length} promptChars=${promptChars} maxCompletionTokens=${maxTokens} tools=${req.tools?.length ?? 0} stream=${wantsStream ? "yes" : "no"} json=${req.jsonResponse ? "yes" : "no"}`,
   );
 
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${trimmedKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    // Retry envelope — Groq's edge occasionally drops a connection
+    // mid-handshake on the cold-start path ("fetch failed" with no
+    // status). We retry up to MAX_ATTEMPTS times with exponential
+    // backoff for TRANSPORT errors (no response received) AND for
+    // 5xx / 408 / 429 responses. 4xx other than 408/429 are user-
+    // error and we bail immediately so we don't waste budget.
+    const MAX_ATTEMPTS = 3;
+    const BACKOFFS_MS = [400, 1200];
+    let res: Response | null = null;
+    let lastTransportError: unknown = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        res = await fetch(ENDPOINT, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${trimmedKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        // Retry on the explicit-transient HTTP codes.
+        if (res.status === 502 || res.status === 503 || res.status === 504 || res.status === 408 || res.status === 429) {
+          if (attempt < MAX_ATTEMPTS) {
+            console.warn(
+              `[groq] ⚠ ${res.status} on attempt ${attempt}/${MAX_ATTEMPTS} — retrying after ${BACKOFFS_MS[attempt - 1]}ms`,
+            );
+            await new Promise((r) => setTimeout(r, BACKOFFS_MS[attempt - 1]));
+            continue;
+          }
+        }
+        break;
+      } catch (err) {
+        // Abort = caller cancelled. Don't retry.
+        if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
+          throw err;
+        }
+        lastTransportError = err;
+        if (attempt < MAX_ATTEMPTS) {
+          const detail = err instanceof Error ? err.message : "unknown";
+          console.warn(
+            `[groq] ⚠ transport "${detail}" on attempt ${attempt}/${MAX_ATTEMPTS} — retrying after ${BACKOFFS_MS[attempt - 1]}ms`,
+          );
+          await new Promise((r) => setTimeout(r, BACKOFFS_MS[attempt - 1]));
+          continue;
+        }
+        // Exhausted retries — surface the last error.
+        const classified = classifyTransportError(err);
+        console.error(`[groq] ✗ transport error after ${MAX_ATTEMPTS} attempts in ${Date.now() - t0}ms — ${classified.log}`);
+        throw new GroqApiError(classified.userMessage, 0, classified.detail);
+      }
+    }
+    if (!res) {
+      const classified = classifyTransportError(lastTransportError);
+      throw new GroqApiError(classified.userMessage, 0, classified.detail);
+    }
 
     const durationMs = Date.now() - t0;
 
@@ -309,19 +389,66 @@ export async function groqChat(req: GroqRequest): Promise<GroqResult> {
       durationMs,
     };
   } catch (err) {
+    // Retry envelope above already classified transport errors;
+    // anything reaching here is either a GroqApiError we should
+    // re-raise as-is, or an AbortError from the timeout signal.
     if (err instanceof GroqApiError) throw err;
-    const msg = err instanceof Error ? err.message : "unknown";
-    console.error(`[groq] ✗ transport error in ${Date.now() - t0}ms — ${msg}`);
-    if (err instanceof Error && err.name === "AbortError") {
+    if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
       throw new GroqApiError(
         `Groq request timed out after ${req.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`,
         0,
       );
     }
-    throw new GroqApiError(`Groq transport error: ${msg}`, 0);
+    const classified = classifyTransportError(err);
+    console.error(`[groq] ✗ unexpected error in ${Date.now() - t0}ms — ${classified.log}`);
+    throw new GroqApiError(classified.userMessage, 0, classified.detail);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function classifyTransportError(err: unknown): {
+  userMessage: string;
+  detail: string;
+  log: string;
+} {
+  const message = err instanceof Error ? err.message : "unknown";
+  const cause = err instanceof Error
+    ? (err as Error & { cause?: { code?: string; message?: string } }).cause
+    : undefined;
+  const code = cause?.code;
+  const causeMessage = cause?.message;
+
+  if (code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE") {
+    return {
+      userMessage:
+        "Groq transport error: Node could not verify Groq's TLS certificate. Forge tried to load system CAs; if this persists, restart the dev server with `npm run dev` so NODE_OPTIONS=--use-system-ca is applied.",
+      detail: `${code}: ${causeMessage ?? message}`,
+      log: `${message}; cause=${code} ${causeMessage ?? ""}`.trim(),
+    };
+  }
+
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return {
+      userMessage: "Groq transport error: DNS lookup failed. Check network/DNS and retry.",
+      detail: `${code}: ${causeMessage ?? message}`,
+      log: `${message}; cause=${code} ${causeMessage ?? ""}`.trim(),
+    };
+  }
+
+  if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") {
+    return {
+      userMessage: "Groq transport error: connection timed out or was reset. Retrying may succeed.",
+      detail: `${code}: ${causeMessage ?? message}`,
+      log: `${message}; cause=${code} ${causeMessage ?? ""}`.trim(),
+    };
+  }
+
+  return {
+    userMessage: `Groq transport error: ${message}`,
+    detail: causeMessage ?? message,
+    log: causeMessage ? `${message}; cause=${causeMessage}` : message,
+  };
 }
 
 /**

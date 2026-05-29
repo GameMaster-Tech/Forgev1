@@ -72,6 +72,12 @@ export function CommandPalette() {
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const items = useRankedCommands(query);
+  // When the query is non-empty we always offer an "Ask Forge" escape
+  // hatch as the final selectable row — it hands the query off to the
+  // research chat (prefilled, not auto-sent) so a search that finds
+  // nothing still has a productive next step.
+  const hasAsk = query.trim().length > 0;
+  const total = items.length + (hasAsk ? 1 : 0);
 
   // Reset state every time the palette opens.
   useEffect(() => {
@@ -84,8 +90,8 @@ export function CommandPalette() {
 
   // Clamp active index when the list shrinks.
   useEffect(() => {
-    if (activeIndex >= items.length) setActiveIndex(Math.max(0, items.length - 1));
-  }, [items.length, activeIndex]);
+    if (activeIndex >= total) setActiveIndex(Math.max(0, total - 1));
+  }, [total, activeIndex]);
 
   // Close on pathname change so navigation auto-dismisses.
   useEffect(() => {
@@ -111,16 +117,27 @@ export function CommandPalette() {
     router.push(href);
   };
 
+  const handleAsk = () => {
+    const q = query.trim();
+    if (!q) return;
+    close();
+    router.push(`/research?ask=${encodeURIComponent(q)}`);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (items.length === 0) return;
+    if (total === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, items.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, total - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
+      if (hasAsk && activeIndex === items.length) {
+        handleAsk();
+        return;
+      }
       const it = items[activeIndex];
       if (it) handleSelect(it);
     } else if (e.key === "Tab") {
@@ -181,23 +198,38 @@ export function CommandPalette() {
               className="max-h-[58vh] overflow-y-auto"
               role="listbox"
             >
-              {items.length === 0 ? (
+              {items.length === 0 && !hasAsk ? (
                 <EmptyState query={query} />
               ) : (
-                <ResultList
-                  items={items}
-                  activeIndex={activeIndex}
-                  onHover={setActiveIndex}
-                  onSelect={handleSelect}
-                  onTogglePin={togglePin}
-                  pinned={pinned}
-                />
+                <>
+                  {items.length > 0 && (
+                    <ResultList
+                      items={items}
+                      activeIndex={activeIndex}
+                      onHover={setActiveIndex}
+                      onSelect={handleSelect}
+                      onTogglePin={togglePin}
+                      pinned={pinned}
+                    />
+                  )}
+                  {hasAsk && (
+                    <AskRow
+                      query={query.trim()}
+                      index={items.length}
+                      active={activeIndex === items.length}
+                      onHover={setActiveIndex}
+                      onAsk={handleAsk}
+                    />
+                  )}
+                </>
               )}
             </div>
 
             <div className="border-t border-border px-4 py-2.5 text-[10px] uppercase tracking-[0.14em] text-muted font-medium flex items-center justify-between flex-wrap gap-2">
               <span>
-                {items.length === 0 ? "No matches" : `${items.length} match${items.length === 1 ? "" : "es"}`}
+                {items.length === 0
+                  ? hasAsk ? "Ask Forge" : "No matches"
+                  : `${items.length} match${items.length === 1 ? "" : "es"}`}
               </span>
               <span className="flex items-center gap-3">
                 <span className="flex items-center gap-1">
@@ -215,6 +247,44 @@ export function CommandPalette() {
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+function AskRow({
+  query,
+  index,
+  active,
+  onHover,
+  onAsk,
+}: {
+  query: string;
+  index: number;
+  active: boolean;
+  onHover: (i: number) => void;
+  onAsk: () => void;
+}) {
+  return (
+    <div className="border-t border-border py-2">
+      <button
+        data-row-index={index}
+        role="option"
+        aria-selected={active}
+        onMouseEnter={() => onHover(index)}
+        onClick={onAsk}
+        className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${
+          active ? "bg-violet/[0.08]" : "hover:bg-violet/[0.04]"
+        }`}
+      >
+        <Sparkles size={12} className="text-violet shrink-0" strokeWidth={1.75} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] text-foreground font-medium truncate">
+            Ask Forge: <span className="text-violet">&quot;{query}&quot;</span>
+          </div>
+          <div className="text-[11px] text-muted truncate">Open research chat with this question</div>
+        </div>
+        {active && <ArrowRight size={11} className="text-violet shrink-0" strokeWidth={2.25} />}
+      </button>
+    </div>
   );
 }
 

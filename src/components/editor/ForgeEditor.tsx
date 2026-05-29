@@ -2,6 +2,8 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import Collaboration from "@tiptap/extension-collaboration";
+import type { Doc as YDoc } from "yjs";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
@@ -13,7 +15,15 @@ import { ClaimMention, type ClaimTrustResolver } from "./extensions/ClaimMention
 import { DataTable } from "./extensions/DataTable";
 import { InlineEmbed } from "./extensions/InlineEmbed";
 import { CommentMark } from "./extensions/CommentMark";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { SlashCommandMenu } from "./SlashCommandMenu";
+import { filterSlashCommands, type SlashCommand } from "./slashCommands";
+import {
+  EditorInputPopover,
+  normalizeUrl,
+  type EditorInputKind,
+} from "./EditorInputPopover";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Bold,
   Italic,
@@ -149,9 +159,20 @@ interface ForgeEditorProps {
    * the click tooltip surfaces the latest value + source + freshness.
    */
   resolveClaimTrust?: ClaimTrustResolver;
+  /**
+   * Optional shared Y.Doc. When supplied the editor switches to
+   * collaborative mode: StarterKit's local history is disabled and the
+   * Collaboration extension makes the Y.Doc the source of truth.
+   */
+  ydoc?: YDoc;
+  /**
+   * True once the collaborative provider has applied initial remote
+   * state. Gates the one-time HTML→Y.Doc seed for migrated documents.
+   */
+  collabSynced?: boolean;
 }
 
-/* â”€â”€â”€ Toolbar button â”€â”€â”€ */
+/* ─── Toolbar button ─── */
 function Btn({
   onClick,
   active,
@@ -186,7 +207,7 @@ function Sep() {
   return <div className="w-px h-4 bg-border mx-1" />;
 }
 
-/* â”€â”€â”€ Block type dropdown â”€â”€â”€ */
+/* ─── Block type dropdown ─── */
 function BlockTypeSelect({
   currentBlock,
   onSelect,
@@ -250,7 +271,7 @@ function BlockTypeSelect({
   );
 }
 
-/* â”€â”€â”€ AI Command Bar â”€â”€â”€ */
+/* ─── AI Command Bar ─── */
 function AICommandBar({
   open,
   onClose,
@@ -404,8 +425,8 @@ function AICommandBarInner({
         <div className="px-4 py-2 border-t border-border">
           <span className="text-[9px] uppercase tracking-[0.15em] text-muted font-mono">
             {hasSelection
-              ? "â†µ enter Â· esc to close"
-              : "tip Â· select text for more options"}
+              ? "↵ enter · esc to close"
+              : "tip · select text for more options"}
           </span>
         </div>
       </motion.div>
@@ -413,7 +434,7 @@ function AICommandBarInner({
   );
 }
 
-/* â”€â”€â”€ AI Result Preview â”€â”€â”€ */
+/* ─── AI Result Preview ─── */
 function AIResultPreview({
   result,
   onAccept,
@@ -479,19 +500,263 @@ function AIResultPreview({
   );
 }
 
+/* ─── Selection bubble menu ─── */
+function BubbleFmtBtn({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active?: boolean;
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`p-1.5 transition-colors duration-150 ${
+        active ? "text-foreground bg-background" : "text-muted hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * SelectionBubble — a compact floating action bar pinned above the
+ * current text selection. Formatting toggles sit alongside one-tap AI
+ * rewrites, which reuse the editor's existing `/api/ai/write` pipeline
+ * via `onAICommand`. Portaled to <body> so it is immune to transformed
+ * ancestors (framer-motion `layout`) that would otherwise break
+ * `position: fixed`. `onMouseDown` is suppressed so clicking a button
+ * never collapses the selection it acts on.
+ */
+function SelectionBubble({
+  coords,
+  editor,
+  onAICommand,
+  onLink,
+}: {
+  coords: { left: number; top: number };
+  editor: import("@tiptap/react").Editor;
+  onAICommand: (cmd: AICommand) => void;
+  onLink: () => void;
+}) {
+  if (typeof document === "undefined") return null;
+  const node = (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.14, ease }}
+      onMouseDown={(e) => e.preventDefault()}
+      style={{
+        position: "fixed",
+        left: coords.left,
+        top: coords.top - 10,
+        transform: "translate(-50%, -100%)",
+        zIndex: 60,
+      }}
+      className="flex items-center gap-0.5 px-1 py-1 bg-surface border border-border shadow-[0_10px_28px_-14px_rgba(0,0,0,0.4)]"
+    >
+      <BubbleFmtBtn
+        active={editor.isActive("bold")}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+        title="Bold"
+      >
+        <Bold size={14} strokeWidth={2.5} />
+      </BubbleFmtBtn>
+      <BubbleFmtBtn
+        active={editor.isActive("italic")}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+        title="Italic"
+      >
+        <Italic size={14} />
+      </BubbleFmtBtn>
+      <BubbleFmtBtn
+        active={editor.isActive("underline")}
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        title="Underline"
+      >
+        <UnderlineIcon size={14} />
+      </BubbleFmtBtn>
+      <BubbleFmtBtn
+        active={editor.isActive("highlight")}
+        onClick={() => editor.chain().focus().toggleHighlight().run()}
+        title="Highlight"
+      >
+        <Highlighter size={14} />
+      </BubbleFmtBtn>
+      <BubbleFmtBtn active={editor.isActive("link")} onClick={onLink} title="Link">
+        <LinkIcon size={14} />
+      </BubbleFmtBtn>
+
+      <div className="w-px h-4 bg-border mx-0.5" />
+
+      {(
+        [
+          { cmd: "fix-grammar" as const, label: "Improve" },
+          { cmd: "make-concise" as const, label: "Concise" },
+          { cmd: "expand" as const, label: "Expand" },
+        ]
+      ).map(({ cmd, label }) => (
+        <button
+          key={cmd}
+          type="button"
+          onClick={() => onAICommand(cmd)}
+          className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] text-violet hover:bg-violet/[0.08] transition-colors"
+        >
+          <Sparkles size={11} strokeWidth={2} />
+          {label}
+        </button>
+      ))}
+    </motion.div>
+  );
+  return createPortal(node, document.body);
+}
+
+/**
+ * Read a slash trigger from the editor's current selection. Returns the
+ * query text and the document range covering "/<query>" so the caller
+ * can delete it before applying a block command. Only fires for an
+ * empty selection sitting in a plain textblock whose content up to the
+ * cursor is exactly "/<query>" (no spaces) — never inside code blocks
+ * or atoms.
+ */
+function readSlashTrigger(
+  ed: import("@tiptap/react").Editor,
+): { query: string; from: number; to: number } | null {
+  const { state } = ed.view;
+  const { selection } = state;
+  if (!selection.empty) return null;
+  const $from = selection.$from;
+  const parent = $from.parent;
+  if (!parent.isTextblock || parent.type.name === "codeBlock") return null;
+  const start = $from.start();
+  const cursor = $from.pos;
+  if (cursor < start) return null;
+  const before = state.doc.textBetween(start, cursor, "\n", "\n");
+  const m = /^\/([^\s/]*)$/.exec(before);
+  if (!m) return null;
+  return { query: m[1], from: start, to: cursor };
+}
+
+function applySlashPick(
+  ed: import("@tiptap/react").Editor,
+  cmd: SlashCommand,
+  range: { from: number; to: number },
+): void {
+  ed.chain().focus().deleteRange(range).run();
+  cmd.run(ed);
+}
+
 export default function ForgeEditor({
   content = "",
   onUpdate,
   onWordCountChange,
   onReady,
   resolveClaimTrust,
+  ydoc,
+  collabSynced,
 }: ForgeEditorProps) {
+  const collab = !!ydoc;
   const [isFocused, setIsFocused] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<AICommand | null>(null);
   const [selectedText, setSelectedText] = useState("");
+  // Viewport coords for the floating selection bubble (null = hidden).
+  const [selBubble, setSelBubble] = useState<{ left: number; top: number } | null>(null);
+
+  /* ─── Slash command menu state ─── */
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashRange, setSlashRange] = useState<{ from: number; to: number } | null>(null);
+  const [slashCoords, setSlashCoords] = useState<{ left: number; bottom: number } | null>(null);
+
+  const slashItems = useMemo(() => filterSlashCommands(slashQuery), [slashQuery]);
+
+  // Refs mirror state so the once-constructed editor keydown handler
+  // reads live values instead of stale closure captures.
+  const slashOpenRef = useRef(false);
+  const slashItemsRef = useRef<SlashCommand[]>(slashItems);
+  const slashIndexRef = useRef(0);
+  const slashRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const editorRef = useRef<import("@tiptap/react").Editor | null>(null);
+
+  useEffect(() => {
+    slashOpenRef.current = slashOpen;
+  }, [slashOpen]);
+  useEffect(() => {
+    slashItemsRef.current = slashItems;
+    // Keep the highlight in range when the filtered list shrinks.
+    setSlashIndex((i) => (i > slashItems.length - 1 ? 0 : i));
+  }, [slashItems]);
+  useEffect(() => {
+    slashIndexRef.current = slashIndex;
+  }, [slashIndex]);
+  useEffect(() => {
+    slashRangeRef.current = slashRange;
+  }, [slashRange]);
+
+  const closeSlash = useCallback(() => {
+    setSlashOpen(false);
+    setSlashQuery("");
+    setSlashIndex(0);
+    setSlashRange(null);
+    setSlashCoords(null);
+  }, []);
+
+  // Recompute the slash trigger from the current selection. Opens the
+  // menu only when "/<query>" is the entire content of a plain
+  // textblock up to the cursor — predictable, no accidental triggers
+  // mid-sentence.
+  const syncSlash = useCallback(
+    (ed: import("@tiptap/react").Editor) => {
+      const trig = readSlashTrigger(ed);
+      if (!trig) {
+        if (slashOpenRef.current) closeSlash();
+        return;
+      }
+      let coords: { left: number; bottom: number } | null = null;
+      try {
+        const c = ed.view.coordsAtPos(trig.from);
+        coords = { left: c.left, bottom: c.bottom };
+      } catch {
+        coords = null;
+      }
+      setSlashOpen(true);
+      setSlashQuery(trig.query);
+      setSlashRange({ from: trig.from, to: trig.to });
+      setSlashCoords(coords);
+    },
+    [closeSlash],
+  );
+
+  const pickSlash = useCallback(
+    (index: number) => {
+      const ed = editorRef.current;
+      const cmd = slashItemsRef.current[index];
+      const range = slashRangeRef.current;
+      if (!ed || !cmd || !range) return;
+      applySlashPick(ed, cmd, range);
+      closeSlash();
+    },
+    [closeSlash],
+  );
+
+  /* ─── Inline input popover (link / math) — replaces window.prompt ─── */
+  const [inputPrompt, setInputPrompt] = useState<{
+    kind: EditorInputKind;
+    initial: string;
+    canRemove: boolean;
+    coords: { left: number; bottom: number } | null;
+  } | null>(null);
 
   // Use a ref so updates to the resolver propagate without recreating
   // the editor (TipTap config is captured once at construction).
@@ -504,6 +769,9 @@ export default function ForgeEditor({
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        // Collaboration ships its own Yjs-backed undo manager; the local
+        // history plugin must be off or the two fight over the doc.
+        ...(collab ? { undoRedo: false as const } : {}),
       }),
       Placeholder.configure({
         placeholder: "Begin writing...",
@@ -531,12 +799,46 @@ export default function ForgeEditor({
       ClaimMention.configure({
         resolveTrust: (key) => claimResolverRef.current?.(key) ?? null,
       }),
+      ...(ydoc ? [Collaboration.configure({ document: ydoc })] : []),
     ],
-    content,
+    // In collaborative mode the Y.Doc is the source of truth — passing
+    // `content` here would double-insert. Migrated HTML is seeded once
+    // after sync via the effect below.
+    content: collab ? undefined : content,
     immediatelyRender: false,
     editorProps: {
       attributes: {
         class: "focus:outline-none",
+      },
+      // Drive slash-menu navigation from ProseMirror's keydown so the
+      // menu and the editor selection never fight over the arrow keys.
+      handleKeyDown: (_view, event) => {
+        if (!slashOpenRef.current) return false;
+        const items = slashItemsRef.current;
+        switch (event.key) {
+          case "ArrowDown":
+            if (items.length > 0) setSlashIndex((i) => (i + 1) % items.length);
+            return true;
+          case "ArrowUp":
+            if (items.length > 0)
+              setSlashIndex((i) => (i - 1 + items.length) % items.length);
+            return true;
+          case "Enter": {
+            const ed = editorRef.current;
+            const cmd = items[slashIndexRef.current];
+            const range = slashRangeRef.current;
+            if (ed && cmd && range) {
+              applySlashPick(ed, cmd, range);
+              closeSlash();
+            }
+            return true;
+          }
+          case "Escape":
+            closeSlash();
+            return true;
+          default:
+            return false;
+        }
       },
     },
     onUpdate: ({ editor }) => {
@@ -545,26 +847,55 @@ export default function ForgeEditor({
       const text = editor.state.doc.textContent;
       const words = text.trim() ? text.trim().split(/\s+/).length : 0;
       onWordCountChange?.(words);
+      syncSlash(editor);
     },
     onFocus: () => setIsFocused(true),
-    onBlur: () => setIsFocused(false),
+    onBlur: () => {
+      setIsFocused(false);
+      closeSlash();
+      setSelBubble(null);
+    },
     onSelectionUpdate: ({ editor }) => {
       const { from, to } = editor.state.selection;
       if (from !== to) {
         setSelectedText(editor.state.doc.textBetween(from, to, " "));
+        try {
+          const start = editor.view.coordsAtPos(from);
+          const end = editor.view.coordsAtPos(to);
+          setSelBubble({ left: (start.left + end.left) / 2, top: Math.min(start.top, end.top) });
+        } catch {
+          setSelBubble(null);
+        }
       } else {
         setSelectedText("");
+        setSelBubble(null);
       }
+      syncSlash(editor);
     },
   });
 
   useEffect(() => {
+    editorRef.current = editor ?? null;
     if (editor) {
       const text = editor.state.doc.textContent;
       const words = text.trim() ? text.trim().split(/\s+/).length : 0;
       onWordCountChange?.(words);
     }
   }, [editor, onWordCountChange]);
+
+  /* One-time migration seed: when a document predates collaboration its
+     content lives only as HTML in Firestore. After the provider syncs,
+     if the shared Y.Doc is still empty we write that HTML in once — the
+     resulting Yjs update persists, so subsequent loads come from the
+     Y.Doc directly. Guarded so it can never run twice for a mount. */
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!collab || !editor || !collabSynced || seededRef.current) return;
+    if (content && editor.isEmpty) {
+      editor.commands.setContent(content);
+    }
+    seededRef.current = true;
+  }, [collab, editor, collabSynced, content]);
 
   /* Expose a small handle to the parent so features like Claim Check can
      read the plaintext and scroll+highlight a matched claim without owning
@@ -612,13 +943,52 @@ export default function ForgeEditor({
     onReady(handle);
   }, [editor, onReady]);
 
-  const addLink = useCallback(() => {
-    if (!editor) return;
-    const url = window.prompt("Enter URL:");
-    if (url) {
-      editor.chain().focus().setLink({ href: url }).run();
-    }
-  }, [editor]);
+  const openInputPrompt = useCallback(
+    (kind: EditorInputKind) => {
+      if (!editor) return;
+      let coords: { left: number; bottom: number } | null = null;
+      try {
+        const c = editor.view.coordsAtPos(editor.state.selection.from);
+        coords = { left: c.left, bottom: c.bottom };
+      } catch {
+        coords = null;
+      }
+      const linkActive = kind === "link" && editor.isActive("link");
+      const initial =
+        kind === "link" && linkActive
+          ? ((editor.getAttributes("link").href as string | undefined) ?? "")
+          : "";
+      setInputPrompt({ kind, initial, canRemove: linkActive, coords });
+    },
+    [editor],
+  );
+
+  const applyInputPrompt = useCallback(
+    (value: string) => {
+      if (!editor || !inputPrompt) return;
+      const v = value.trim();
+      if (inputPrompt.kind === "link") {
+        if (!v) {
+          editor.chain().focus().extendMarkRange("link").unsetLink().run();
+        } else {
+          editor
+            .chain()
+            .focus()
+            .extendMarkRange("link")
+            .setLink({ href: normalizeUrl(v) })
+            .run();
+        }
+      } else if (inputPrompt.kind === "inline-math" && v) {
+        editor.chain().focus().insertInlineMath(v).run();
+      } else if (inputPrompt.kind === "block-math" && v) {
+        editor.chain().focus().insertBlockMath(v).run();
+      }
+      setInputPrompt(null);
+    },
+    [editor, inputPrompt],
+  );
+
+  const addLink = useCallback(() => openInputPrompt("link"), [openInputPrompt]);
 
   const handleBlockTypeSelect = useCallback(
     (type: string) => {
@@ -711,7 +1081,7 @@ export default function ForgeEditor({
 
   return (
     <div className="flex flex-col h-full">
-      {/* â”€â”€â”€ Floating Toolbar â”€â”€â”€ */}
+      {/* ─── Floating Toolbar ─── */}
       <motion.div
         initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
@@ -746,7 +1116,7 @@ export default function ForgeEditor({
 
           <Sep />
 
-          {/* Text formatting â€” warm group */}
+          {/* Text formatting — warm group */}
           <Btn
             onClick={() => editor.chain().focus().toggleBold().run()}
             active={editor.isActive("bold")}
@@ -785,7 +1155,7 @@ export default function ForgeEditor({
 
           <Sep />
 
-          {/* Structure â€” violet group */}
+          {/* Structure — violet group */}
           <Btn
             onClick={() =>
               editor.chain().focus().toggleHeading({ level: 1 }).run()
@@ -816,7 +1186,7 @@ export default function ForgeEditor({
 
           <Sep />
 
-          {/* Lists â€” green group */}
+          {/* Lists — green group */}
           <Btn
             onClick={() => editor.chain().focus().toggleBulletList().run()}
             active={editor.isActive("bulletList")}
@@ -847,7 +1217,7 @@ export default function ForgeEditor({
 
           <Sep />
 
-          {/* Link + math â€” cyan group */}
+          {/* Link + math — cyan group */}
           <Btn
             onClick={addLink}
             active={editor.isActive("link")}
@@ -857,35 +1227,19 @@ export default function ForgeEditor({
           </Btn>
 
           <Btn
-            onClick={() => {
-              const latex = window.prompt(
-                "Inline LaTeX (e.g. a^2 + b^2 = c^2):",
-                ""
-              );
-              if (latex !== null && latex.trim()) {
-                editor.chain().focus().insertInlineMath(latex.trim()).run();
-              }
-            }}
+            onClick={() => openInputPrompt("inline-math")}
             active={editor.isActive("inlineMath")}
-            title="Inline math  ($â€¦$)"
+            title="Inline math ($…$)"
           >
             <Sigma size={15} />
           </Btn>
           <Btn
-            onClick={() => {
-              const latex = window.prompt(
-                "Block LaTeX (e.g. \\int_0^\\infty e^{-x}\\,dx = 1):",
-                ""
-              );
-              if (latex !== null && latex.trim()) {
-                editor.chain().focus().insertBlockMath(latex.trim()).run();
-              }
-            }}
+            onClick={() => openInputPrompt("block-math")}
             active={editor.isActive("blockMath")}
-            title="Block math  ($$â€¦$$)"
+            title="Block math ($$…$$)"
           >
             <span className="font-mono text-[11px] font-bold tracking-tight">
-              Î£âˆ«
+              Σ∫
             </span>
           </Btn>
 
@@ -964,11 +1318,51 @@ export default function ForgeEditor({
         </div>
       </motion.div>
 
-      {/* â”€â”€â”€ Editor canvas â”€â”€â”€ */}
+      {/* ─── Editor canvas ─── */}
       <div className="flex-1 overflow-y-auto bg-background">
         <div className="max-w-[720px] mx-auto pt-16 pb-40 px-6">
           <EditorContent editor={editor} />
         </div>
+
+        {/* Selection bubble — quick formatting + one-tap AI rewrites.
+            Suppressed whenever another AI surface owns the moment. */}
+        {selBubble &&
+          !aiOpen &&
+          !aiLoading &&
+          !aiResult &&
+          !slashOpen &&
+          !inputPrompt && (
+            <SelectionBubble
+              coords={selBubble}
+              editor={editor}
+              onAICommand={handleAICommand}
+              onLink={addLink}
+            />
+          )}
+
+        {/* Slash command menu — anchored at the caret. */}
+        <SlashCommandMenu
+          open={slashOpen}
+          query={slashQuery}
+          items={slashItems}
+          activeIndex={slashIndex}
+          coords={slashCoords}
+          onPick={pickSlash}
+          onHover={setSlashIndex}
+        />
+
+        {/* Inline input popover — link / inline-math / block-math. */}
+        {inputPrompt && (
+          <EditorInputPopover
+            key={`${inputPrompt.kind}:${inputPrompt.initial}`}
+            kind={inputPrompt.kind}
+            initial={inputPrompt.initial}
+            canRemove={inputPrompt.canRemove}
+            coords={inputPrompt.coords}
+            onSubmit={applyInputPrompt}
+            onCancel={() => setInputPrompt(null)}
+          />
+        )}
 
         {/* AI Result Preview */}
         <AnimatePresence>

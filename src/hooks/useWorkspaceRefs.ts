@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * useWorkspaceRefs — fast in-memory search over the user's docs
- * in the active project, used by the chat composer's @ picker.
+ * useWorkspaceRefs — fast in-memory search over the user's docs in
+ * the active project, or across the workspace when no project is
+ * selected, used by the chat composer's @ picker.
  *
  * We fetch the project's docs once (titles + ids only — no body)
  * when the project changes, then filter client-side. A 200-doc
@@ -20,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { auth } from "@/lib/firebase/config";
-import { getProjectDocuments } from "@/lib/firebase/firestore";
+import { getProjectDocuments, getUserDocuments } from "@/lib/firebase/firestore";
 
 export interface WorkspaceRef {
   id: string;
@@ -41,10 +42,6 @@ export function useWorkspaceRefs(projectId: string | null): {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!projectId) {
-      setRefs([]);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     (async () => {
@@ -54,7 +51,9 @@ export function useWorkspaceRefs(projectId: string | null): {
         return;
       }
       try {
-        const docs = await getProjectDocuments(projectId, uid);
+        const docs = projectId
+          ? await getProjectDocuments(projectId, uid)
+          : await getUserDocuments(uid);
         if (cancelled) return;
         setRefs(
           docs.map((d) => ({

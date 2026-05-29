@@ -12,8 +12,8 @@ import {
   Copy,
   Loader2,
   Network,
-  Flag,
   MessageSquare,
+  GitBranch,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useProjectsStore } from "@/store/projects";
@@ -27,10 +27,12 @@ import ForgeEditor, {
   type EditorHandle,
 } from "@/components/editor/ForgeEditor";
 import ResearchSidePanel from "@/components/editor/ResearchSidePanel";
-import ClaimCheckPanel from "@/components/editor/ClaimCheckPanel";
 import { ShareLinkButton } from "@/components/editor/ShareLinkButton";
 import { CommentsPanel } from "@/components/editor/CommentsPanel";
+import { DocumentOutline } from "@/components/editor/DocumentOutline";
+import { RelatedDocsPanel } from "@/components/editor/RelatedDocsPanel";
 import { useDocComments } from "@/hooks/useDocComments";
+import { useCollaborativeDoc } from "@/hooks/useCollaborativeDoc";
 import type { Editor } from "@tiptap/react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
@@ -44,6 +46,7 @@ export default function EditorPage({
 }) {
   const { projectId, docId } = use(params);
   const { user } = useAuth();
+  const { ydoc, synced: collabSynced } = useCollaborativeDoc(docId);
   const project = useProjectsStore((s) => s.getProject(projectId));
   const fetchProjects = useProjectsStore((s) => s.fetchProjects);
 
@@ -51,7 +54,7 @@ export default function EditorPage({
   const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState("Untitled Document");
   const [researchOpen, setResearchOpen] = useState(false);
-  const [claimsOpen, setClaimsOpen] = useState(false);
+  const [relatedOpen, setRelatedOpen] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [citationCount, setCitationCount] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
@@ -81,7 +84,7 @@ export default function EditorPage({
     setPendingAnchor(text);
     setCommentsOpen(true);
     setResearchOpen(false);
-    setClaimsOpen(false);
+    setRelatedOpen(false);
   }, [editor]);
 
   const handleAddComment = useCallback(
@@ -105,8 +108,14 @@ export default function EditorPage({
 
   const openComments = useCallback(() => {
     setResearchOpen(false);
-    setClaimsOpen(false);
+    setRelatedOpen(false);
     setCommentsOpen((v) => !v);
+  }, []);
+
+  const openRelated = useCallback(() => {
+    setResearchOpen(false);
+    setCommentsOpen(false);
+    setRelatedOpen((v) => !v);
   }, []);
 
   // Track whether the editor currently has a non-empty selection so
@@ -128,13 +137,9 @@ export default function EditorPage({
   }, [editor]);
 
   const openResearch = useCallback(() => {
-    setClaimsOpen(false);
+    setCommentsOpen(false);
+    setRelatedOpen(false);
     setResearchOpen((v) => !v);
-  }, []);
-
-  const openClaims = useCallback(() => {
-    setResearchOpen(false);
-    setClaimsOpen((v) => !v);
   }, []);
 
   useEffect(() => {
@@ -285,17 +290,17 @@ export default function EditorPage({
         {/* Right: icon-only affordances */}
         <div className="flex items-center gap-0.5">
           <ToolIconButton
-            icon={Flag}
-            label="Check claims"
-            active={claimsOpen}
-            onClick={openClaims}
-          />
-          <ToolIconButton
             icon={MessageSquare}
             label={hasSelection ? "Comment on selection" : "Open comments"}
             active={commentsOpen}
             onClick={hasSelection ? startComment : openComments}
             hasDot={commentsApi.comments.some((c) => !c.resolved)}
+          />
+          <ToolIconButton
+            icon={GitBranch}
+            label="Related documents"
+            active={relatedOpen}
+            onClick={openRelated}
           />
           <ToolIconButton
             icon={researchOpen ? PanelRightClose : PanelRightOpen}
@@ -376,6 +381,9 @@ export default function EditorPage({
 
       {/* ── Workspace ── */}
       <div className="flex-1 flex overflow-hidden relative">
+        {/* Live table-of-contents rail (xl+, hides itself when <2 headings) */}
+        <DocumentOutline editor={editor} />
+
         <motion.div
           className="flex-1 flex flex-col overflow-hidden min-w-0"
           layout
@@ -406,6 +414,8 @@ export default function EditorPage({
 
           <ForgeEditor
             content={editorHtml}
+            ydoc={ydoc}
+            collabSynced={collabSynced}
             onUpdate={handleEditorUpdate}
             onWordCountChange={setWordCount}
             onReady={(handle) => {
@@ -418,28 +428,21 @@ export default function EditorPage({
         {/* Side panels (mutually exclusive). Quiet 1px border —
             no decorative gradient — keeps focus on the editor. */}
         <div className="relative">
-          {(researchOpen || claimsOpen || commentsOpen) && (
+          {(researchOpen || commentsOpen || relatedOpen) && (
             <div className="absolute top-0 left-0 bottom-0 w-px bg-border z-10" />
           )}
+          <RelatedDocsPanel
+            open={relatedOpen}
+            onClose={() => setRelatedOpen(false)}
+            projectId={projectId}
+            docId={docId}
+            probe={`${title}\n${editorHandleRef.current?.getPlainText() ?? ""}`}
+          />
           <ResearchSidePanel
             open={researchOpen}
             onClose={() => setResearchOpen(false)}
             onInsertCitation={handleInsertCitation}
             projectId={projectId}
-          />
-          <ClaimCheckPanel
-            open={claimsOpen}
-            onClose={() => setClaimsOpen(false)}
-            getEditorText={() => editorHandleRef.current?.getPlainText() ?? ""}
-            onJumpToClaim={(text) => editorHandleRef.current?.jumpToText(text)}
-            onInsertCitation={(c) => {
-              handleInsertCitation({
-                title: c.title,
-                url: c.url,
-                text: c.text,
-                doi: c.doi,
-              });
-            }}
           />
           <CommentsPanel
             open={commentsOpen}
@@ -490,7 +493,7 @@ function ToolIconButton({
   onClick,
   hasDot,
 }: {
-  icon: typeof Flag;
+  icon: typeof MessageSquare;
   label: string;
   active?: boolean;
   onClick: () => void;

@@ -110,6 +110,9 @@ export interface RunAgentOptions {
   registry: BuiltRegistry;
   ctx: ToolContext;
   model?: string;
+  maxCompletionTokens?: number;
+  reasoningEffort?: "none" | "default" | "low" | "medium" | "high";
+  reasoningFormat?: "hidden" | "parsed";
   maxTurns?: number;
   temperature?: number;
   /** How long each individual Groq call may take. */
@@ -127,6 +130,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
     registry,
     ctx,
     model = DEFAULT_MODEL,
+    maxCompletionTokens = 2_000,
+    reasoningEffort,
+    reasoningFormat,
     maxTurns = DEFAULT_MAX_TURNS,
     temperature = 0.3,
     perCallTimeoutMs = 30_000,
@@ -177,7 +183,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
         tools: registry.definitions,
         toolChoice: "auto",
         temperature,
-        maxCompletionTokens: 2_000,
+        maxCompletionTokens,
+        reasoningEffort,
+        reasoningFormat,
         timeoutMs: perCallTimeoutMs,
         onDelta: isLikelyFinalTurn
           ? (text) => emit({ kind: "delta", text })

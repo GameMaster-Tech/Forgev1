@@ -167,16 +167,19 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
 
   // Seed (or re-seed) completion logs whenever the habit list changes.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCompletionsByHabit(seedCompletions(schedulerPayload.habits));
   }, [schedulerPayload.habits]);
 
   // Project-scoped forge events come from useSchedulerWorkspace.
-  // Google events flow through a separate subscription on the
-  // user-wide /users/{uid}/calendar/events collection (where the
-  // /api/integrations/google/sync route writes them via the Admin SDK).
+  // External events flow through a separate subscription on the
+  // user-wide /users/{uid}/google_events collection. Keep this as a
+  // three-segment collection path; Firestore rejects the old
+  // users/{uid}/calendar/events shape as an invalid collection ref.
   const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => {
     if (!user?.uid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGoogleEvents([]);
       return;
     }
@@ -192,6 +195,7 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
   // come from the project; Google events come from the user-wide
   // subscription. De-dupe by id in case the same event got mirrored.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEvents((prev) => {
       const seen = new Set<string>();
       const out: CalendarEvent[] = [];
@@ -249,6 +253,7 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
   // calendars stay empty.
   useEffect(() => {
     if (!projectId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSystemEvents([]);
       return;
     }
@@ -324,7 +329,7 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [user?.uid, projectId],
+    [user, projectId],
   );
   const openNewEvent = useCallback(() => setNewEventOpen(true), []);
   const closeNewEvent = useCallback(() => setNewEventOpen(false), []);

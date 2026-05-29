@@ -27,6 +27,7 @@ import {
   Microscope,
   Network,
   Plus,
+  Sparkles,
   X,
   Zap,
   AlertTriangle,
@@ -39,6 +40,7 @@ import {
   getProjectDocuments,
   type FirestoreDocument,
 } from "@/lib/firebase/firestore";
+import { CrystallizeModal } from "@/components/crystallize/CrystallizeModal";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -100,6 +102,7 @@ export default function ProjectPage({
   const [newDocTitle, setNewDocTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [showCrystallize, setShowCrystallize] = useState(false);
 
   useEffect(() => {
     if (user?.uid) fetchProjects(user.uid);
@@ -301,13 +304,28 @@ export default function ProjectPage({
               .
             </p>
           </div>
-          <button
-            onClick={() => setShowNewDoc(true)}
-            className="flex items-center gap-2 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.12em] px-5 py-2.5 transition-colors duration-150 shrink-0"
-          >
-            <Plus size={12} strokeWidth={2.25} />
-            New document
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => setShowCrystallize(true)}
+              disabled={docs.length < 2}
+              title={
+                docs.length < 2
+                  ? "Need at least 2 docs to crystallize"
+                  : "Synthesize 2–5 docs into a new brief"
+              }
+              className="inline-flex items-center gap-1.5 border border-violet/40 text-violet hover:bg-violet/[0.08] disabled:opacity-50 disabled:cursor-not-allowed text-[11px] font-semibold uppercase tracking-[0.14em] px-3 py-2 transition-colors"
+            >
+              <Sparkles size={12} strokeWidth={2.25} />
+              Crystallize
+            </button>
+            <button
+              onClick={() => setShowNewDoc(true)}
+              className="inline-flex items-center gap-1.5 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.14em] px-3.5 py-2 transition-colors"
+            >
+              <Plus size={12} strokeWidth={2.25} />
+              New document
+            </button>
+          </div>
         </div>
       </motion.header>
 
@@ -440,6 +458,15 @@ export default function ProjectPage({
           <ToolsCard projectId={projectId} />
         </aside>
       </div>
+
+      {/* Crystallize — cross-doc synthesis modal. Mounted at root
+          so its focus trap + backdrop sit above all page content. */}
+      <CrystallizeModal
+        open={showCrystallize}
+        onClose={() => setShowCrystallize(false)}
+        projectId={projectId}
+        docs={docs}
+      />
     </div>
   );
 }

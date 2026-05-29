@@ -57,7 +57,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import { replayTutorial } from "@/components/onboarding/Tutorial";
 import { useRecentChats } from "@/hooks/useRecentChats";
-import { EchoBell } from "@/components/echo/EchoBell";
 import { AccountSwitcher } from "@/components/app/AccountSwitcher";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
@@ -521,12 +520,6 @@ export default function Sidebar({
             {!expanded ? <RailTooltip label="Tour Forge" /> : null}
           </button>
 
-          {/* Echo — opens the tension tray. Pulses when there's an
-              unseen high-severity notice. */}
-          <EchoBell
-            variant="rail"
-            className={expanded ? "w-8 h-8" : "w-full h-9"}
-          />
 
           <button
             onClick={() => logout()}

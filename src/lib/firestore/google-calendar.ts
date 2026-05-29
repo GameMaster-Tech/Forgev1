@@ -39,6 +39,7 @@ const SURFACED_SOURCES = new Set(["google", "notion"]);
  * from.
  */
 function timedToCalendarEvent(t: TimedEvent): CalendarEvent {
+  const metadata = t as TimedEvent & { allDay?: boolean };
   const source =
     t.externalSource === "google"
       ? "google"
@@ -52,7 +53,7 @@ function timedToCalendarEvent(t: TimedEvent): CalendarEvent {
     description: t.description,
     start: t.start,
     end: t.end,
-    allDay: false,
+    allDay: metadata.allDay ?? isDateOnly(t.start),
     kind: t.eventKind ?? "meeting",
     source,
     externalId: t.externalId,
@@ -72,7 +73,8 @@ export function subscribeGoogleEvents(
     (snap) => {
       const out: CalendarEvent[] = [];
       for (const d of snap.docs) {
-        const data = d.data() as TimedEvent;
+        const data = d.data() as TimedEvent & { archived?: boolean; status?: string };
+        if (data.archived || data.status === "cancelled") continue;
         // Surface every mirrored source — currently Google + Notion.
         // Anything else is internal scheduler bookkeeping that
         // shouldn't show on the user-facing grid.
@@ -88,3 +90,7 @@ export function subscribeGoogleEvents(
 
 /** Modern alias — `subscribeGoogleEvents` is kept for back-compat. */
 export const subscribeMirrorEvents = subscribeGoogleEvents;
+
+function isDateOnly(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}

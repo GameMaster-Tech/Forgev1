@@ -186,12 +186,12 @@ export async function disconnect(): Promise<GoogleIntegrationState> {
 }
 
 /**
- * Trigger a bidirectional sync run. The server route writes events to
- * `users/{uid}/calendar/events` via the Admin SDK; the
- * `CalendarProvider` subscribes to that collection through
- * `subscribeGoogleEvents`, so events appear in the grid via the live
- * subscription — this helper doesn't need to return them. Returns
- * `[]` for legacy call-site compatibility.
+ * Trigger a sync run. The server route writes events to
+ * `users/{uid}/google_events` via the Admin SDK; the
+ * `CalendarProvider` subscribes to that three-segment collection
+ * through `subscribeGoogleEvents`, so events appear in the grid via
+ * the live subscription. Returns `[]` for legacy call-site
+ * compatibility.
  */
 export async function listEvents(
   rangeStart: Date,

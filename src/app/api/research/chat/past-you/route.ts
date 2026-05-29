@@ -31,7 +31,8 @@ import {
   rateLimitResponse,
   RATE_LIMIT_EXPENSIVE,
 } from "@/lib/server/rate-limit";
-import { DEFAULT_MODEL, type ChatMessage } from "@/lib/ai/groq";
+import { type ChatMessage } from "@/lib/ai/groq";
+import { resolveGroqModeConfig } from "@/lib/ai/models";
 import { runAgent, type AgentEvent } from "@/lib/ai/agent";
 import { buildRegistry } from "@/lib/ai/tools/registry";
 import {
@@ -59,6 +60,8 @@ interface ChatBody {
   asOf?: unknown;
   projectName?: unknown;
   projectId?: unknown;
+  modelId?: unknown;
+  aiMode?: unknown;
   history?: unknown;
   userMessage?: unknown;
 }
@@ -174,6 +177,10 @@ export async function POST(request: Request): Promise<Response> {
 
   const system = buildSystemPrompt({ asOf, projectName });
   const registry = buildRegistry({ groups: ["past-you"] });
+  const modelConfig = resolveGroqModeConfig({
+    model: typeof body.modelId === "string" ? body.modelId : null,
+    mode: typeof body.aiMode === "string" ? body.aiMode : "standard",
+  });
   const messages: ChatMessage[] = [
     ...trimmed.map((t) => ({ role: t.role, content: t.content }) as ChatMessage),
     { role: "user", content: userMessage },
@@ -216,7 +223,10 @@ export async function POST(request: Request): Promise<Response> {
             startedAt: Date.now(),
             asOf,
           },
-          model: DEFAULT_MODEL,
+          model: modelConfig.model,
+          maxCompletionTokens: modelConfig.maxCompletionTokens,
+          reasoningEffort: modelConfig.reasoningEffort,
+          reasoningFormat: modelConfig.reasoningFormat,
           maxTurns: 6,
           temperature: 0.45,
           perCallTimeoutMs: 30_000,

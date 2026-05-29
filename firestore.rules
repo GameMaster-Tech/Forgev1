@@ -176,6 +176,16 @@ service cloud.firestore {
       allow update, delete: if request.auth != null
                             && request.auth.uid == resource.data.userId;
 
+      // Collaborative editing log — append-only Yjs updates synced by
+      // FirestoreYjsProvider. Ownership inherits from the parent document
+      // via parent traversal. Append-only (no update); delete is allowed
+      // for the owner so a future compaction pass can fold the log.
+      match /yUpdates/{updateId} {
+        allow read, create, delete: if request.auth != null
+                              && request.auth.uid ==
+                                 get(/databases/$(database)/documents/documents/$(docId)).data.userId;
+      }
+
       // Comments + reply threads. Ownership inherits from the parent
       // document via parent traversal, so list queries on the
       // subcollection work without an extra ownership filter.
