@@ -54,15 +54,28 @@ export function LivingSectionView({ node, updateAttributes, editor, selected }: 
 
   // Live plaintext of the host document. Lazy-init (no effect setState) and
   // refreshed only inside the editor's update callback — keeps us clear of
-  // the cascading-render rule.
+  // the cascading-render rule. The same callback PERSISTS drift (stable →
+  // drifting) into the node so Calm Review can find stale sections by reading
+  // the saved status, without re-deriving text the same way everywhere.
   const [docText, setDocText] = useState(() => editor.getText());
   useEffect(() => {
-    const handler = () => setDocText(editor.getText());
+    const handler = () => {
+      const text = editor.getText();
+      setDocText(text);
+      const current = normaliseData(node.attrs.data);
+      if (current.status === "stable" && current.sourceHash) {
+        const h = hashSources([{ label: SOURCE_LABEL, text }]);
+        if (h !== current.sourceHash) {
+          // Transition once; guard prevents an update loop.
+          updateAttributes({ data: { ...current, status: "drifting" } });
+        }
+      }
+    };
     editor.on("update", handler);
     return () => {
       editor.off("update", handler);
     };
-  }, [editor]);
+  }, [editor, node.attrs.data, updateAttributes]);
 
   const currentHash = useMemo(
     () => hashSources([{ label: SOURCE_LABEL, text: docText }]),

@@ -51,6 +51,7 @@ import {
   Sparkles,
   Sun,
   Users,
+  Waves,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { motion, AnimatePresence } from "framer-motion";
@@ -58,6 +59,7 @@ import { useAuth } from "@/context/AuthContext";
 import { replayTutorial } from "@/components/onboarding/Tutorial";
 import { useRecentChats } from "@/hooks/useRecentChats";
 import { AccountSwitcher } from "@/components/app/AccountSwitcher";
+import { CalmReview } from "@/components/reactive/CalmReview";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 const COLLAPSED_W = 56;
@@ -197,6 +199,7 @@ export default function Sidebar({
   const { user, logout } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   // Hydrate expanded state from localStorage on mount.
   useEffect(() => {
@@ -520,6 +523,18 @@ export default function Sidebar({
             {!expanded ? <RailTooltip label="Tour Forge" /> : null}
           </button>
 
+          <button
+            type="button"
+            onClick={() => setReviewOpen(true)}
+            aria-label="Calm review"
+            className={`group relative flex items-center justify-center text-background/55 hover:text-background hover:bg-white/[0.05] transition-colors duration-150 ${
+              expanded ? "w-8 h-8" : "w-full h-9"
+            }`}
+          >
+            <Waves size={14} />
+            {!expanded ? <RailTooltip label="Review" /> : null}
+          </button>
+
 
           <button
             onClick={() => logout()}
@@ -540,6 +555,10 @@ export default function Sidebar({
             other Google account that's signed in on this device. */}
         <AccountSwitcher expanded={expanded} />
       </div>
+
+      {/* Calm Review — portals to <body>; mounted here so the trigger above
+          can open it. */}
+      <CalmReview open={reviewOpen} onClose={() => setReviewOpen(false)} />
     </motion.aside>
   );
 }
