@@ -1,87 +1,74 @@
-# Forge → AI-Native Reactive Workspace — Execution Plan (v5)
+# Forge → AI-Native Reactive Workspace — Plan (v6, simplified)
 
-> Status: **active.** Direction locked: a general **AI-Native Workspace** that is
-> **reactive** (AI *and* reactive — not just one). P0 de-link committed
-> (`d448bc7`). Now: design the feature set, build it, then pivot the backend.
+> Status: **active.** Done: P0 de-link (`d448bc7`), R1 Reactor foundation
+> (`67da961`). This version *simplifies scope* and *defines the refactors*.
 
-## 0. The paradigm
+## Simplification (what changed from v5)
 
-Forge's edge: **content has dependencies, and AI propagates *meaning* through
-them.** Think a spreadsheet's reactive formula graph — but the cells are
-free-form knowledge and "recompute" is AI synthesis. No mainstream workspace
-does true semantic reactivity over prose (Notion synced-blocks are literal
-copies; DB formulas only work on structured fields).
+1. **One flagship first.** Build **Reactors** end-to-end. **Ripples** and
+   **Drift** stay in the vision but are sequenced *after* Reactors ships — not
+   built in parallel.
+2. **Do NOT rewire `forge-graph`.** Reactors are **self-contained editor nodes**:
+   the rule, sources, derived value, and status all live as node attributes
+   inside the document. No new Firestore collection, no DAG surgery. We reuse
+   only `searchWorkspace`/embed (relevance) + `/api/ai/reactor` (recompute).
+3. **State in the document.** A Reactor persists with the doc's content (it's a
+   block), so it works with the existing autosave + collab path unchanged.
 
-**Forge already owns the engine to do this.** `forge-graph` ("Forge Reactive
-Workspace") is a dependency DAG with `upstream/downstreamDependencies`,
-`STABLE/CONFLICTED/DRIFTING` status, per-node semantic embeddings, versioned
-propagation, and adapters that already turn **documents + editor content** into
-nodes. Today it only drives calendar/claims. **We generalize it to all content.**
-(This reverses the earlier "purge the engine" plan: we purge the research
-*surfaces*, keep + upgrade the *engine*.)
+This makes Reactors a low-risk, additive feature, and the "backend pivot" reduces
+to: *add one recompute route (done) + remove the research backend.*
 
-## 1. Feature set (designed now → built next)
+## Reactor — definition (precise)
 
-### F1 — Reactors  *(novel · flagship)*
-A block whose content is **derived by a natural-language rule over sources** and
-**recomputes itself when those sources change.**
+A **block** in the editor whose body is **derived from a natural-language rule
+over sources**, recomputable on demand (auto later).
 
-- You write a rule: `↻ summary of {Atlas notes}`, `↻ open questions across {these
-  3 docs}`, `↻ current pricing from {Pricing}`.
-- AI computes the derived content; the Reactor records a dependency on its
-  sources.
-- When a source changes, the Reactor is marked `drifting` and re-synthesizes
-  (per the autonomy setting) — **reactive, AI-native, composable.**
-- This is the diverse/innovative evolution of "Living Pages": composable derived
-  *blocks*, not just whole-page synthesis.
+- **Node attrs:** `id`, `rule` (string), `sources` (ReactorSourceRef[]),
+  `value` (HTML), `sourceHash`, `status` (`empty|computing|stable|drifting|error`),
+  `computedAt`.
+- **Insert:** `/reactor` in the slash menu → empty Reactor block.
+- **Configure:** type the rule; pick sources (this doc / other docs in the
+  project / whole project). Empty sources = whole project.
+- **Compute:** client resolves sources → plain text, posts `{rule, sources}` to
+  `/api/ai/reactor`, writes the returned HTML into `value`, stores `sourceHash`,
+  sets `status=stable`.
+- **Render:** node view shows a header (↻ rule chip + status dot + Refresh) and
+  the derived content below.
+- **Drift (next phase):** on doc/source change, re-resolve sources; if
+  `hashSources` ≠ stored `sourceHash` → `status=drifting`; Refresh recomputes.
 
-### F2 — Ripples  *(novel · flagship)*
-The **push** direction. When you edit content, Forge uses the dependency graph +
-semantic similarity to find **downstream content that just went stale** and
-surfaces it: *"You changed the launch date here — it's referenced in 3 places."*
-One tap reconciles them (AI updates the dependents).
+## Defined refactors
 
-- AI-native: detects *semantic* dependents, reconciles via LLM.
-- Reactive: change propagation through the graph.
-- Nothing mainstream propagates *meaning* changes across free-form docs.
+### A. ADD — Reactors (feature build)
+- `src/components/editor/extensions/Reactor/` — Tiptap node (`extension.ts`) +
+  React node view (`view.tsx`) with the rule/sources/refresh UI.
+- `src/hooks/useReactor.ts` — resolve sources (reuse `getDocument` /
+  `searchWorkspace`), call `/api/ai/reactor`, update node attrs, compute drift
+  via `hashSources`.
+- Register the node in `ForgeEditor.tsx` extensions; add a `/reactor` slash
+  command in `slashCommands.ts`.
+- (Done: `src/lib/reactive/types.ts`, `POST /api/ai/reactor`.)
 
-### Semi — Drift  *(supporting)*
-A calm, ambient **reactive-status affordance** reusing the engine's
-`STABLE / DRIFTING / CONFLICTED` states: a margin dot/chip on reactive content
-showing whether it's current, with one-tap **Reconcile now**. Makes F1 + F2
-visible and trustworthy. Small, shared glue.
+### B. REMOVE — research surfaces + dead code (the purge)
+- **Routes:** `src/app/(app)/pulse/`, `src/app/(app)/sync/`,
+  `src/app/(app)/preview/`.
+- **APIs:** `src/app/api/pulse/`, `src/app/api/ai/check-claims/`.
+- **Editor research:** `ClaimCheckPanel.tsx`, `ContradictionBanner.tsx`, and
+  their wiring in `ForgeEditor.tsx` + the doc page; `useDocContradictions.ts`,
+  `useProjectContradictions.ts`.
+- **Pulse internals:** `usePulseWorkspace.ts`, `useFreshnessScan.ts`,
+  `lib/firestore/pulse.ts`, `forge-graph/adapters/pulse-blocks.ts`.
+- **Untangle:** drop Pulse imports from `CalendarProvider`/`SyncProvider`
+  (Sync route is being removed; refactor Calendar off Pulse); remove the
+  `pulse-blocks` usage in `forge-graph/builder.ts` + `index.ts`.
 
-## 2. Architecture upgrade (the backend pivot)
+### C. KEEP (reactive primitives — do NOT remove)
+- `forge-graph` core, `/api/forge-graph/embed`, `/api/forge-graph/semantic-check`
+  — these stay as the reactive substrate.
+- Calendar (untangled from Pulse), Research chat, Projects, Teams, Settings.
 
-Generalize `forge-graph` from calendar/claims to **content reactivity**:
-- A `reactive/` layer: a `Reactor` model (rule, source refs, last value, source
-  hash, status) persisted in Firestore; a dependency index over content.
-- **Recompute service** — `POST /api/ai/reactor`: given a rule + resolved source
-  text, Groq synthesizes the derived content (HTML fragment). Debounced, cached
-  by source-content hash, incremental.
-- **Propagation** — on save, embed the changed block (existing embed endpoint),
-  find dependents (graph edges + cosine), mark them `drifting` → drives Ripples
-  + Drift.
-- Reuse Groq + auth + rate-limit helpers and the `forge-graph` adapters
-  (`documents`, `tiptap`). Surgical embeddings; no store-everything vectors.
-- Fold the research backend (`check-claims`, pulse APIs) out as surfaces are
-  removed (P1–P3 below); keep `semantic-check`/embed as reactive primitives.
-
-## 3. Checkpoints (each green: tsc + lint + build; I report)
-
-- **P0 — De-link research surfaces.** DONE (`d448bc7`).
-- **R1 — Reactor foundation.** `reactive/types.ts` + `POST /api/ai/reactor`
-  recompute endpoint. (This checkpoint.)
-- **R2 — Reactor in the editor.** A reactive block node + a hook that resolves
-  sources, calls recompute, renders + caches; manual refresh first.
-- **R3 — Drift (semi).** Source-hash staleness → `drifting` status + Reconcile
-  affordance; then autonomous refresh.
-- **R4 — Ripples.** Propagation on save → downstream stale detection + one-tap
-  reconcile.
-- **R5 — Remove research surfaces' dead code** (Pulse/Checks/Sync routes) now
-  that nav is clean; reframe onboarding/landing around reactivity.
-
-## 4. Out of scope (now)
-
-Autonomous task-agents, ANN index, multi-modal, the unbuilt Veritas/Forge-SAI
-model, claim extraction in the core path.
+## Checkpoints (each green: tsc + lint + build)
+- **R2** — Reactor editor node + slash insert + manual Refresh. *(next)*
+- **R3** — Drift detection + status + one-tap Reconcile.
+- **R4** — Ripples (downstream propagation on save).
+- **B-purge** — execute refactor B in green steps; reframe onboarding/landing.
