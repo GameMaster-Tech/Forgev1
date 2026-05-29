@@ -1,104 +1,86 @@
-# Forge → AI-Native Workspace — Execution Plan (v3)
+# Forge → AI-Native Workspace — Execution Plan (v4)
 
-> Status: **active.** Morph removed. v3 is grounded in a competitive scan
-> (May 2026) of Notion AI, Mem, Tana, Reflect, Capacities, Taskade, and the
-> wave of "proactive agent" tools.
+> Status: **active.** Decisions locked: **full research purge** + flagship
+> **Living Pages** (concept being refined). Backend pivots to serve it.
 
-## 0. What the research actually proves
+## 0. Direction
 
-The AI-workspace category has **converged**. Every serious tool is racing down
-the same four lanes:
+Forge becomes a **lean, general AI-native workspace** judged by **autonomy,
+comfort, speed**. The research/verification subsystem is being removed entirely,
+and the backend re-pointed at a single novel capability: **Living Pages**.
 
-1. **Agents that do tasks for you** (Notion's agent hub; autonomous multi-step).
-2. **Auto-organization** ("don't file anything; AI sorts it" — Mem, Tana).
-3. **Q&A / search over your content** (everyone).
-4. **Multi-format generation** (one outline → doc/slides/tasks — Skywork, Beautiful.ai).
-   …and now **proactive/anticipatory agents** that prep work before you ask.
+Competitive scan (May 2026) confirmed: the category converged on agents,
+auto-organization, Q&A, and multi-format generation. "Self-updating documents"
+exists only in **publishing/docs/KB** niches (GitBook sync, Code-to-Docs, living
+style guides) and experiments (Karpathy's wiki). **No one ships autonomous,
+self-maintaining synthesis as a general personal-workspace primitive.** That is
+the lane.
 
-**Conclusion:** chasing a *never-before-seen feature* is a trap. Everything I
-proposed earlier maps onto a lane above — that's *why* Grounding, Weave, Atlas,
-and **Morph** all read as derivative. Morph = "delegate a task to the AI," which
-is lane 1. Removed.
+## 1. Target surface (keep / remove)
 
-**Honest reassessment of the other planned pillars:**
-- **Command-as-Action** (NL command bar that *does* things) = lane 1 (the agent
-  race). Crowded. Dropped as a flagship.
-- **Continuity** (style/persistent memory) = Mem's whole pitch. Not unique on
-  its own. Demoted to an enhancer.
+**Keep (general workspace):** Projects, Documents/editor, Research chat (general
+AI assistant), Calendar (general scheduling), Activity, Teams, Settings, ⌘K.
 
-## 1. The lane no one owns
+**Remove (research/verification machinery — the "full purge"):**
+- **Pulse** — assertion freshness + refactors (`/pulse`, `/api/pulse/*`,
+  `usePulseWorkspace`, `useFreshnessScan`, `lib/firestore/pulse`,
+  `forge-graph/adapters/pulse-blocks`).
+- **Checks** — in-editor contradiction/claim checking (`/api/ai/check-claims`,
+  `useDocContradictions`, `useProjectContradictions`, `ClaimCheckPanel`,
+  `ContradictionBanner`, claim pills / `ClaimMention`).
+- **Sync** — conflicts/constraints/invariants (`/sync`, `SyncProvider`).
+- **Echo** — semantic reactivity (`useSemanticReactivity`, `SemanticFlash`,
+  Echo bell/tray, `/api/forge-graph/semantic-check`).
+- **forge-graph reasoning** + **Tempo** agent + impact-simulator **Preview** —
+  the claim/graph reasoning layer, once nothing general depends on it.
+- `/api/ai/write`'s research framing → folded into the new backend.
 
-Every competitor frames AI as a **producer/doer** that takes work *off* you, and
-is sprinting toward *more autonomy*. The unoccupied, contrarian position:
+**Dependency note (why this is sequenced, not one delete):** `CalendarProvider`
+and `SyncProvider` import Pulse; `forge-graph/builder` uses `pulse-blocks`;
+`forge-graph` is shared by Tempo/Calendar/Echo; `semantic-check` is shared by
+Echo. Each removal must untangle these and stay green.
 
-> **Forge keeps you in flow. AI amplifies the human in the act of thinking and
-> writing — instantly, reversibly — and never takes over.**
+## 2. Purge sequence (each checkpoint ends green: tsc + lint + build)
 
-This is the *opposite* of the agent race, and it is exactly where **speed,
-comfort, quality** live:
+- **P0 — De-link (DONE this checkpoint).** Remove Pulse/Checks(Sync)/Preview
+  from sidebar, mobile nav, and the ⌘K command set. Routes still exist
+  transiently; the workspace *surface* is already lean.
+- **P1 — Editor de-research.** Strip Checks from the editor (ContradictionBanner,
+  ClaimCheckPanel, `useDocContradictions`, claim pills) + delete `check-claims`.
+- **P2 — Remove Sync** (routes + `SyncProvider`); untangle Calendar's Pulse dep.
+- **P3 — Remove Pulse** (routes/APIs/hooks/lib/adapter).
+- **P4 — Remove Echo** (reactivity, flash, bell/tray, `semantic-check`).
+- **P5 — Remove forge-graph reasoning / Tempo / Preview** once orphaned; prune
+  onboarding (Tutorial) + landing copy of research framing.
 
-- **Speed** — no chat round-trips, no "go ask the AI." Help appears *in* the
-  work, at the keystroke, sub-second.
-- **Comfort** — you never leave the keyboard, never lose control, everything is
-  reversible/ignorable. The AI is ambient, not a thing you operate.
-- **Quality** — output is in *your* voice and *your* context, so it's keepable.
+## 3. Backend pivot (after the surface is lean)
 
-**Intellectual honesty:** no single mechanic below is unprecedented in isolation
-(in-line suggestions, recall, etc. all exist somewhere). The moat is the
-**consistent stance executed better than anyone**: every AI touch in Forge is
-in-flow, instant, reversible, and human-led — never a chat box, never a delegate,
-never a wait. That consistency is the product.
+Replace the claim/freshness/contradiction backend with a **Living Pages service**:
+- **Content model:** every page can be `static` or `living` (`spec` = the
+  intent, `sources` = scope, `lastSynthesisAt`, `revision`).
+- **Synthesis worker:** on relevant change (debounced) or on demand, gather the
+  semantically-relevant workspace content (surgical embeddings via the existing
+  embed endpoint) and have Groq **rewrite/reconcile** the page, preserving the
+  user's edits where possible.
+- **Speed:** incremental (only re-synthesize affected sections), cached by
+  content hash, streamed.
+- Reuse the Groq + auth + rate-limit helpers. No store-everything vectors.
 
-## 2. Signature build — "Flow"
+## 4. Flagship: Living Pages (REFINING — open design choices)
 
-A small set of in-flow amplifiers that share one rule: *zero prompts, instant,
-reversible, in your voice.*
+A page defined by *intent* that Forge keeps synthesized and current autonomously.
+Open questions to lock the concept (pending user steer):
 
-- **F1 — In-flow continuation.** As you pause, Forge offers the next phrase / the
-  next bullet as dim **ghost text**; **Tab** accepts, anything else dismisses.
-  Grounded in the current document (and your recent voice), not a generic model.
-  No menu, no chat, no spinner.
-- **F2 — In-flow polish.** Select a few words → an instant, inline single-tap
-  tighten/clarify that *shows the change* and is one keystroke to accept/undo
-  (reversible diff, not a destructive replace).
-- **F3 — In-flow recall (later).** When a sentence you're typing closely matches
-  something you already wrote, a one-line, dismissible cue lets you pull it in —
-  surfaced *inline while typing*, never a panel.
+1. **Trigger / autonomy level** — fully autonomous background refresh, vs. "stale"
+   badge + one-tap refresh, vs. on-open refresh? (comfort vs. control)
+2. **Scope of integration** — whole workspace, a chosen project, or explicit
+   linked sources?
+3. **Edit reconciliation** — may it rewrite text the user hand-edited, or only
+   append/update AI-owned regions? (trust)
+4. **Granularity** — a whole living *page*, or living *blocks* embeddable in any
+   doc?
 
-Differentiation vs. autocomplete/Notion: **zero-prompt + your-context grounding +
-reversible + thought/structure-level (not just word-level) + the no-chat stance.**
+## 5. Out of scope
 
-## 3. Backend posture
-
-- **Speed first.** A dedicated, low-latency completion path on `FAST_MODEL`,
-  streamed, short-output, aggressively debounced + cached. Interactive AI must
-  feel instant — that is the feature.
-- **Reuse, don't sprawl.** Build on the existing Groq layer and auth/rate-limit
-  helpers. Surgical embeddings only where recall (F3) needs them.
-- **De-emphasize** research/claims surfaces from the default path (unchanged from
-  v2): keep as optional tools, not the identity.
-
-## 4. Checkpoints (each ends green: typecheck + lint + `next build`; I report)
-
-- **CP-A — F1 in-flow continuation.** Fast streamed completion endpoint + a
-  ProseMirror ghost-text layer (Tab accept / Esc dismiss), debounced, off by
-  default with a one-tap toggle. *Verify:* pause → ghost appears <1s, Tab keeps
-  it, typing dismisses it, fully reversible.
-- **CP-B — F2 in-flow polish** (reversible inline diff on a selection).
-- **CP-C — speed/quality pass** (caching, voice grounding) + **F3 recall**.
-- **CP-D — de-emphasize research framing in nav/onboarding.**
-
-## 5. Risks & decisions
-
-- **"This is just autocomplete."** Mitigated by grounding + reversibility + the
-  consistent no-chat stance; F2/F3 move it past word-level completion. If the
-  bar is "unprecedented mechanic," that likely doesn't exist in this category —
-  see §0.
-- **Latency.** Sub-second is the whole point; if `FAST_MODEL` can't hit it
-  reliably, the feature fails its own test — we measure before shipping CP-A.
-- **Distraction.** Ghosting must be calm and opt-in; never auto-insert.
-
-## 6. Out of scope (now)
-
-Autonomous agents, store-everything vectors, multi-modal, the unbuilt
-"Veritas-R1/Forge-SAI" model, claim extraction in the core path.
+Autonomous task-agents, ANN/vector index, multi-modal, the unbuilt
+Veritas/Forge-SAI model.

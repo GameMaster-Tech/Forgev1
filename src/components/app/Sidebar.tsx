@@ -30,7 +30,6 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   Calendar,
   CalendarPlus,
   ChevronsLeft,
@@ -40,7 +39,6 @@ import {
   FileText,
   FolderOpen,
   FolderPlus,
-  GitBranch,
   History,
   LogOut,
   MessageSquare,
@@ -48,7 +46,6 @@ import {
   Plus,
   Search,
   Settings,
-  Sparkles,
   Sun,
   Users,
 } from "lucide-react";
@@ -64,13 +61,13 @@ const COLLAPSED_W = 56;
 const EXPANDED_W = 260;
 const STORAGE_KEY = "forge.sidebar.expanded.v1";
 
+// Lean AI-native workspace nav. The research/verification machinery
+// (Checks=/sync, Freshness=/pulse, Preview=impact simulator) is being
+// purged; routes still exist transiently but are no longer surfaced.
 const navItems: { href: string; icon: typeof Search; label: string }[] = [
   { href: "/research", icon: Search, label: "Research" },
   { href: "/projects", icon: FolderOpen, label: "Projects" },
   { href: "/calendar", icon: Calendar, label: "Calendar" },
-  { href: "/preview", icon: Sparkles, label: "Preview" },
-  { href: "/sync", icon: GitBranch, label: "Checks" },
-  { href: "/pulse", icon: Activity, label: "Freshness" },
   { href: "/activity", icon: History, label: "Activity" },
   { href: "/teams", icon: Users, label: "Teams" },
   { href: "/settings", icon: Settings, label: "Settings" },
