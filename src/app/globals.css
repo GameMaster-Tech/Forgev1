@@ -35,12 +35,14 @@
   --violet: #1D4ED8;
   --violet-light: #60A5FA;
 
-  /* Sidebar — deep obsidian */
-  --sidebar: #0C0A14;
-  --sidebar-hover: #15151D;
-  --sidebar-active: #1C1C28;
-  --sidebar-text: #85879A;
-  --sidebar-text-bright: #E8E9F0;
+  /* Sidebar — deep indigo-charcoal. Softer than pure obsidian: a touch of
+     blue reads as calm/focused (not heavy), and the violet-leaning active
+     state ties it to the brand accent. Lifted text for restful legibility. */
+  --sidebar: #161622;
+  --sidebar-hover: #20202F;
+  --sidebar-active: #2A2A41;
+  --sidebar-text: #9B9DB4;
+  --sidebar-text-bright: #EDEEF6;
 
   /* Backward-compat aliases */
   --midnight: #070510;
@@ -95,11 +97,11 @@
   --violet: #3B82F6;
   --violet-light: #93C5FD;
 
-  /* Sidebar — deep with blue undertone */
-  --sidebar: #0A0A0F;
-  --sidebar-hover: #131318;
-  --sidebar-active: #1A1A24;
-  --sidebar-text: #686880;
+  /* Sidebar — deep indigo-charcoal (calmer than pure black, violet-leaning). */
+  --sidebar: #121220;
+  --sidebar-hover: #1C1C2B;
+  --sidebar-active: #26263C;
+  --sidebar-text: #7E8098;
   --sidebar-text-bright: #E0E1EC;
 
   /* Backward-compat aliases */

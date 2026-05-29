@@ -18,7 +18,6 @@ import {
   collection,
   limit as fbLimit,
   onSnapshot,
-  orderBy,
   query,
   where,
   type Unsubscribe,
@@ -39,17 +38,22 @@ export function useRecentChats(uid: string | null, max = 8): RecentChat[] {
 
   useEffect(() => {
     if (!uid) {
-      setRows([]);
-      return;
+      // Defer the reset so we never call setState synchronously in the
+      // effect body (cascading-render lint rule).
+      const reset = setTimeout(() => setRows([]));
+      return () => clearTimeout(reset);
     }
     let unsub: Unsubscribe | null = null;
     try {
+      // Equality-only on userId so we depend solely on Firestore's automatic
+      // single-field index — no composite index required (the old
+      // userId + archived + orderBy(updatedAt) query silently failed when the
+      // index wasn't deployed, leaving Recent chats empty). We over-fetch,
+      // then filter archived + sort by recency + cap on the client.
       const q = query(
         collection(db, "conversations"),
         where("userId", "==", uid),
-        where("archived", "==", false),
-        orderBy("updatedAt", "desc"),
-        fbLimit(max),
+        fbLimit(100),
       );
       unsub = onSnapshot(
         q,
@@ -57,6 +61,7 @@ export function useRecentChats(uid: string | null, max = 8): RecentChat[] {
           const next: RecentChat[] = [];
           for (const d of snap.docs) {
             const data = d.data() as FirestoreConversation;
+            if (data.archived === true) continue;
             const ts =
               typeof (data.updatedAt as { toMillis?: () => number })?.toMillis === "function"
                 ? (data.updatedAt as { toMillis: () => number }).toMillis()
@@ -68,7 +73,8 @@ export function useRecentChats(uid: string | null, max = 8): RecentChat[] {
               updatedAt: ts,
             });
           }
-          setRows(next);
+          next.sort((a, b) => b.updatedAt - a.updatedAt);
+          setRows(next.slice(0, max));
         },
         (err) => {
           // Index/permission failures shouldn't crash the sidebar — just
