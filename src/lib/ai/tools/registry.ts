@@ -20,6 +20,7 @@ import "server-only";
 import type { Tool, ToolContext, ToolDefinition } from "./types";
 import { CALENDAR_TOOLS } from "./calendar";
 import { DOC_TOOLS } from "./docs";
+import { PROJECT_TOOLS } from "./projects";
 import { RESEARCH_TOOLS } from "./research";
 import { PAST_YOU_TOOLS } from "./past-you";
 
@@ -28,6 +29,7 @@ export type ToolGroup =
   | "tasks"
   | "docs"
   | "docs:read"
+  | "projects"
   | "research"
   | "past-you"
   | "all";
@@ -36,6 +38,7 @@ export type ToolGroup =
 const ALL_TOOLS: Tool[] = [
   ...CALENDAR_TOOLS,
   ...DOC_TOOLS,
+  ...PROJECT_TOOLS,
   ...RESEARCH_TOOLS,
   ...PAST_YOU_TOOLS,
 ];
@@ -64,6 +67,10 @@ function expandGroups(groups: ToolGroup[]): Tool[] {
       DOC_TOOLS.filter((t) => t.name === "docs_list" || t.name === "docs_read").forEach(
         (t) => set.add(t),
       );
+      continue;
+    }
+    if (g === "projects") {
+      PROJECT_TOOLS.forEach((t) => set.add(t));
       continue;
     }
     if (g === "research") {
