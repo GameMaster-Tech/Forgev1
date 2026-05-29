@@ -36,6 +36,12 @@ export interface FirestoreProject {
   docCount: number;
   status: "active" | "archived";
   teamId?: string | null;
+  /**
+   * Soft-delete tombstone. When set, the project lives in Trash and is
+   * filtered out of every primary listing. Restore clears it back to
+   * null. Absent on legacy docs — treated as "not trashed".
+   */
+  deletedAt?: Timestamp | null;
 }
 
 export type TeamRole = "owner" | "admin" | "member" | "viewer";
@@ -90,6 +96,34 @@ export interface FirestoreDocument {
    * breadcrumbs in the editor.
    */
   parentId?: string | null;
+  /**
+   * Soft-delete tombstone. When set, the document lives in Trash and is
+   * filtered out of every primary listing (project tree, global search,
+   * @-references). Restore clears it back to null. Absent on legacy docs
+   * — treated as "not trashed".
+   */
+  deletedAt?: Timestamp | null;
+  /**
+   * Optimistic-concurrency revision counter, bumped on every saved write.
+   * Absent on legacy docs — treated as 0. See {@link saveDocumentRevision}.
+   */
+  rev?: number;
+}
+
+/**
+ * A document is live (not trashed) when it has no `deletedAt` tombstone.
+ * We filter client-side rather than with a Firestore `where` clause
+ * because legacy docs predate the field and a `where("deletedAt","==",
+ * null)` query silently excludes documents that are *missing* the field
+ * entirely — which would hide every existing doc. Client-side filtering
+ * is correct for all rows regardless of whether the field exists.
+ */
+export function isLiveDocument(d: FirestoreDocument): boolean {
+  return d.deletedAt == null;
+}
+
+export function isLiveProject(p: FirestoreProject): boolean {
+  return p.deletedAt == null;
 }
 
 /* ─── Projects ─── */
@@ -165,7 +199,26 @@ export async function getUserProjects(userId: string) {
       orderBy("updatedAt", "desc")
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreProject));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FirestoreProject))
+      .filter(isLiveProject);
+  } catch (err) {
+    throw new Error(firebaseReadErrorMessage(err));
+  }
+}
+
+/** Trashed projects for the recovery surface (most-recently-trashed first). */
+export async function getTrashedProjects(userId: string) {
+  try {
+    const q = query(
+      collection(db, "projects"),
+      where("userId", "==", userId),
+      orderBy("updatedAt", "desc"),
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FirestoreProject))
+      .filter((p) => p.deletedAt != null);
   } catch (err) {
     throw new Error(firebaseReadErrorMessage(err));
   }
@@ -192,9 +245,143 @@ export async function updateProject(
   workspaceCache.invalidate(projectId);
 }
 
-export async function deleteProject(projectId: string) {
-  await deleteDoc(doc(db, "projects", projectId));
+/**
+ * Soft-delete a project — moves it to Trash. The project and all its
+ * documents are preserved; they simply stop appearing in primary
+ * listings until restored or permanently deleted.
+ */
+export async function trashProject(projectId: string) {
+  await updateDoc(doc(db, "projects", projectId), {
+    deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
   workspaceCache.invalidate(projectId);
+}
+
+/** Restore a trashed project back into the active workspace. */
+export async function restoreProject(projectId: string) {
+  await updateDoc(doc(db, "projects", projectId), {
+    deletedAt: null,
+    updatedAt: serverTimestamp(),
+  });
+  workspaceCache.invalidate(projectId);
+}
+
+/**
+ * Permanently delete a project AND cascade-delete its documents. This is
+ * the only path that destroys data, and it's reachable solely from the
+ * Trash surface — never from the primary UI. Chunked batches keep us
+ * under Firestore's 500-op-per-batch ceiling.
+ */
+export async function permanentlyDeleteProject(projectId: string) {
+  const FIRESTORE_BATCH_LIMIT = 450;
+  // Firestore rules require a userId filter on document queries (the rule
+  // checks per-doc ownership and can't verify it for an unfiltered query).
+  // Read the owner off the project doc and scope the cascade to them.
+  const projectSnap = await getDoc(doc(db, "projects", projectId));
+  const ownerId = projectSnap.exists()
+    ? (projectSnap.data() as FirestoreProject).userId
+    : null;
+  const docRefs = ownerId
+    ? (
+        await getDocs(
+          query(
+            collection(db, "documents"),
+            where("userId", "==", ownerId),
+            where("projectId", "==", projectId),
+          ),
+        )
+      ).docs
+    : [];
+
+  let batch = writeBatch(db);
+  let ops = 0;
+  const flushIfFull = async () => {
+    if (ops >= FIRESTORE_BATCH_LIMIT) {
+      await batch.commit();
+      batch = writeBatch(db);
+      ops = 0;
+    }
+  };
+  for (const d of docRefs) {
+    batch.delete(d.ref);
+    ops++;
+    await flushIfFull();
+  }
+  batch.delete(doc(db, "projects", projectId));
+  await batch.commit();
+  workspaceCache.invalidate(projectId);
+}
+
+/**
+ * @deprecated Use {@link trashProject} for the primary path. Retained as
+ * a thin alias so existing callers still soft-delete rather than destroy.
+ */
+export async function deleteProject(projectId: string) {
+  await trashProject(projectId);
+}
+
+/* ─── Conflict-safe document writes ─── */
+
+export class DocumentConflictError extends Error {
+  /** The revision the server currently holds (newer than ours). */
+  remoteRev: number;
+  constructor(remoteRev: number) {
+    super("Document was changed elsewhere");
+    this.name = "DocumentConflictError";
+    this.remoteRev = remoteRev;
+  }
+}
+
+export interface RevisionedSave {
+  /** Fields to persist. */
+  data: Partial<Pick<FirestoreDocument, "title" | "content" | "wordCount" | "citationCount" | "verifiedCount">>;
+  /** The revision the client believes is current (server `rev` it last saw). */
+  baseRev: number;
+}
+
+/**
+ * Optimistic-concurrency document save. Writes `data` only if the
+ * server's `rev` still matches `baseRev` — otherwise another writer (a
+ * second tab or device) got there first and we throw
+ * {@link DocumentConflictError} instead of silently clobbering their
+ * edit. On success the new revision (`baseRev + 1`) is returned so the
+ * caller can advance its local cursor.
+ *
+ * Legacy docs without a `rev` field are treated as rev 0, so the first
+ * save from any client lands cleanly.
+ */
+export async function saveDocumentRevision(
+  docId: string,
+  { data, baseRev }: RevisionedSave,
+  projectId?: string,
+): Promise<number> {
+  const ref = doc(db, "documents", docId);
+  const nextRev = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Document no longer exists");
+    const current = snap.data() as FirestoreDocument & { rev?: number };
+    const remoteRev = typeof current.rev === "number" ? current.rev : 0;
+    if (remoteRev !== baseRev) {
+      throw new DocumentConflictError(remoteRev);
+    }
+    const newRev = remoteRev + 1;
+    tx.update(ref, { ...data, rev: newRev, updatedAt: serverTimestamp() });
+    return newRev;
+  });
+
+  if (projectId) {
+    workspaceCache.invalidate(projectId);
+  }
+  return nextRev;
+}
+
+/** Read a document's current revision (0 when the field is absent). */
+export async function getDocumentRevision(docId: string): Promise<number> {
+  const snap = await getDoc(doc(db, "documents", docId));
+  if (!snap.exists()) return 0;
+  const data = snap.data() as { rev?: number };
+  return typeof data.rev === "number" ? data.rev : 0;
 }
 
 /* ─── Documents ─── */
@@ -215,6 +402,7 @@ export async function createDocument(
       citationCount: 0,
       verifiedCount: 0,
       parentId,
+      rev: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -258,7 +446,9 @@ export async function getProjectDocuments(projectId: string, userId?: string) {
 
     const q = query(collection(db, "documents"), ...constraints);
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument))
+      .filter(isLiveDocument);
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? "";
     if (code === "failed-precondition") {
@@ -287,10 +477,15 @@ export async function getUserDocuments(userId: string, limitCount = 80) {
       collection(db, "documents"),
       where("userId", "==", userId),
       orderBy("updatedAt", "desc"),
-      limit(limitCount),
+      // Over-fetch a little so client-side trash filtering still leaves a
+      // healthy result set even when some recent docs are trashed.
+      limit(limitCount + 20),
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument))
+      .filter(isLiveDocument)
+      .slice(0, limitCount);
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? "";
     if (code === "failed-precondition" || code === "permission-denied") {
@@ -341,14 +536,147 @@ export async function updateDocument(
   }
 }
 
-export async function deleteDocument(docId: string, projectId: string) {
-  await deleteDoc(doc(db, "documents", docId));
+/**
+ * Soft-delete a document — moves it to Trash. The row is preserved with a
+ * `deletedAt` tombstone and the project's doc count is decremented so the
+ * live count stays accurate. Restore reverses both. This is the primary
+ * delete path; nothing is destroyed.
+ */
+export async function trashDocument(docId: string, projectId: string) {
+  await updateDoc(doc(db, "documents", docId), {
+    deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
   workspaceCache.invalidate(projectId);
 
-  // Decrement project doc count
   const project = await getProject(projectId);
   if (project && project.docCount > 0) {
     await updateProject(projectId, { docCount: project.docCount - 1 });
+  }
+}
+
+/** Restore a trashed document back into its project. */
+export async function restoreDocument(docId: string, projectId: string) {
+  await updateDoc(doc(db, "documents", docId), {
+    deletedAt: null,
+    updatedAt: serverTimestamp(),
+  });
+  workspaceCache.invalidate(projectId);
+
+  const project = await getProject(projectId);
+  if (project) {
+    await updateProject(projectId, { docCount: project.docCount + 1 });
+  }
+}
+
+/**
+ * Permanently delete a document. Reachable only from the Trash surface.
+ * The doc count was already decremented when the doc was trashed, so we
+ * don't touch it here.
+ */
+export async function permanentlyDeleteDocument(docId: string, projectId: string) {
+  await deleteDoc(doc(db, "documents", docId));
+  workspaceCache.invalidate(projectId);
+}
+
+/**
+ * @deprecated Use {@link trashDocument}. Retained as a soft-delete alias
+ * so any older caller moves the doc to Trash rather than destroying it.
+ */
+export async function deleteDocument(docId: string, projectId: string) {
+  await trashDocument(docId, projectId);
+}
+
+/** Trashed documents for the recovery surface. */
+export async function getTrashedDocuments(userId: string) {
+  try {
+    const q = query(
+      collection(db, "documents"),
+      where("userId", "==", userId),
+      orderBy("updatedAt", "desc"),
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as FirestoreDocument))
+      .filter((d) => d.deletedAt != null);
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code ?? "";
+    if (code === "failed-precondition" || code === "permission-denied") {
+      console.warn("Firestore trashed-documents query unavailable.");
+      return [];
+    }
+    if (isFirebaseOfflineError(err)) {
+      console.warn(firebaseReadErrorMessage(err));
+      return [];
+    }
+    throw new Error(firebaseReadErrorMessage(err));
+  }
+}
+
+/**
+ * Duplicate a document — clones title (suffixed " (copy)"), content, and
+ * counts into a new row in the same project under the same parent.
+ * Returns the new document id.
+ */
+export async function duplicateDocument(docId: string): Promise<string> {
+  const original = await getDocument(docId);
+  if (!original) throw new Error("Document not found");
+  const ref = await addDoc(collection(db, "documents"), {
+    userId: original.userId,
+    projectId: original.projectId,
+    title: `${original.title || "Untitled"} (copy)`,
+    content: original.content ?? "",
+    wordCount: original.wordCount ?? 0,
+    citationCount: original.citationCount ?? 0,
+    verifiedCount: original.verifiedCount ?? 0,
+    parentId: original.parentId ?? null,
+    rev: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    const project = await getProject(original.projectId);
+    if (project) {
+      await updateProject(original.projectId, { docCount: project.docCount + 1 });
+    }
+  } catch (countErr) {
+    console.warn("Failed to update project doc count on duplicate:", countErr);
+  }
+  workspaceCache.invalidate(original.projectId);
+  return ref.id;
+}
+
+/**
+ * Move a document to another project. Updates doc counts on both the
+ * source and destination projects and detaches it from any parent (a
+ * parent in the old project would be a dangling edge in the new one).
+ */
+export async function moveDocument(
+  docId: string,
+  fromProjectId: string,
+  toProjectId: string,
+) {
+  if (fromProjectId === toProjectId) return;
+  await updateDoc(doc(db, "documents", docId), {
+    projectId: toProjectId,
+    parentId: null,
+    updatedAt: serverTimestamp(),
+  });
+  workspaceCache.invalidate(fromProjectId);
+  workspaceCache.invalidate(toProjectId);
+
+  try {
+    const from = await getProject(fromProjectId);
+    if (from && from.docCount > 0) {
+      await updateProject(fromProjectId, { docCount: from.docCount - 1 });
+    }
+    const to = await getProject(toProjectId);
+    if (to) {
+      await updateProject(toProjectId, { docCount: to.docCount + 1 });
+    }
+  } catch (countErr) {
+    console.warn("Failed to update doc counts on move:", countErr);
   }
 }
 

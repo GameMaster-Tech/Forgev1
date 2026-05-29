@@ -24,6 +24,7 @@ import {
   Moon,
   Type,
   Activity,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -350,7 +351,14 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    <div className="mt-6 pt-5 border-t border-border">
+                    <div className="mt-6 pt-5 border-t border-border flex items-center gap-3 flex-wrap">
+                      <Link
+                        href="/trash"
+                        className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground border border-border hover:border-violet/40 hover:bg-violet/[0.04] px-4 py-2.5 transition-colors duration-200"
+                      >
+                        <Trash2 size={14} />
+                        Trash &amp; recovery
+                      </Link>
                       <button
                         onClick={handleSignOut}
                         disabled={signingOut}

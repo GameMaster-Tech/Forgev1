@@ -2,6 +2,7 @@
 
 import { use, useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   PanelRightClose,
@@ -14,15 +15,28 @@ import {
   Network,
   MessageSquare,
   GitBranch,
+  FileText,
+  FileCode,
+  ChevronRight,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { useProjectsStore } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import {
   getDocument,
-  updateDocument,
+  duplicateDocument,
+  trashDocument,
+  restoreDocument,
   type FirestoreDocument,
 } from "@/lib/firebase/firestore";
+import { useDocumentAutosave } from "@/hooks/useDocumentAutosave";
+import {
+  exportDocumentMarkdown,
+  exportDocumentHtml,
+} from "@/lib/io/document-export";
 import ForgeEditor, {
   type EditorHandle,
 } from "@/components/editor/ForgeEditor";
@@ -37,14 +51,13 @@ import type { Editor } from "@tiptap/react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
-const AUTO_SAVE_DELAY = 2000;
-
 export default function EditorPage({
   params,
 }: {
   params: Promise<{ projectId: string; docId: string }>;
 }) {
   const { projectId, docId } = use(params);
+  const router = useRouter();
   const { user } = useAuth();
   const { ydoc, synced: collabSynced } = useCollaborativeDoc(docId);
   const project = useProjectsStore((s) => s.getProject(projectId));
@@ -58,12 +71,16 @@ export default function EditorPage({
   const [wordCount, setWordCount] = useState(0);
   const [citationCount, setCitationCount] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
-  const [saved, setSaved] = useState(true);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [editorHtml, setEditorHtml] = useState("");
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestContentRef = useRef("");
+  const wordCountRef = useRef(0);
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+
+  const autosave = useDocumentAutosave(docId, projectId);
 
   // NOTE: contradiction scanning lives on the /checks page (run from
   // there, not from inside the editor) — keeps the doc surface focused
@@ -156,8 +173,12 @@ export default function EditorPage({
           setDocData(doc);
           setTitle(doc.title);
           setEditorHtml(doc.content || "");
+          latestContentRef.current = doc.content || "";
           setWordCount(doc.wordCount);
           setCitationCount(doc.citationCount);
+          // Seed the autosave revision cursor so the first optimistic
+          // write lands cleanly instead of registering a false conflict.
+          autosave.init(doc.rev ?? 0);
         }
       } catch (err) {
         console.error("Failed to load document:", err);
@@ -169,42 +190,98 @@ export default function EditorPage({
     return () => {
       cancelled = true;
     };
+    // autosave.init is a stable useCallback; intentionally not a dep so a
+    // reload doesn't re-trigger the whole load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
-  const saveToFirestore = useCallback(
-    async (content: string, words: number) => {
-      try {
-        await updateDocument(docId, { content, wordCount: words });
-        setSaved(true);
-      } catch (err) {
-        console.error("Auto-save failed:", err);
-      }
-    },
-    [docId]
-  );
+  const handleWordCount = useCallback((count: number) => {
+    wordCountRef.current = count;
+    setWordCount(count);
+  }, []);
 
   const handleEditorUpdate = useCallback(
     (html?: string) => {
-      setSaved(false);
       if (html !== undefined) latestContentRef.current = html;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        saveToFirestore(latestContentRef.current, wordCount);
-      }, AUTO_SAVE_DELAY);
+      autosave.queueContent(latestContentRef.current, wordCountRef.current);
     },
-    [saveToFirestore, wordCount]
+    [autosave],
   );
 
   const handleTitleChange = useCallback(
     (newTitle: string) => {
       setTitle(newTitle);
-      setSaved(false);
-      updateDocument(docId, { title: newTitle })
-        .then(() => setSaved(true))
-        .catch(() => {});
+      autosave.queueTitle(newTitle);
     },
-    [docId]
+    [autosave],
   );
+
+  // ── Overflow-menu actions ────────────────────────────────────
+  const currentHtml = useCallback(
+    () => editor?.getHTML() ?? latestContentRef.current ?? editorHtml,
+    [editor, editorHtml],
+  );
+
+  const handleExportMarkdown = useCallback(() => {
+    exportDocumentMarkdown(title, currentHtml());
+    setExportOpen(false);
+    setShowMenu(false);
+    toast.success("Exported Markdown");
+  }, [title, currentHtml]);
+
+  const handleExportHtml = useCallback(() => {
+    exportDocumentHtml(title, currentHtml());
+    setExportOpen(false);
+    setShowMenu(false);
+    toast.success("Exported HTML");
+  }, [title, currentHtml]);
+
+  const handleDuplicate = useCallback(async () => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    // Flush any pending edit first so the copy reflects the latest text.
+    autosave.flush();
+    try {
+      const newId = await duplicateDocument(docId);
+      setShowMenu(false);
+      toast.success("Document duplicated");
+      router.push(`/project/${projectId}/doc/${newId}`);
+    } catch (err) {
+      console.error("Duplicate failed:", err);
+      toast.error("Couldn't duplicate this document");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, autosave, docId, projectId, router]);
+
+  const handleDelete = useCallback(async () => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await trashDocument(docId, projectId);
+      setConfirmDelete(false);
+      setShowMenu(false);
+      toast.success("Moved to Trash", {
+        description: "Recover it any time from Settings → Trash.",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            restoreDocument(docId, projectId)
+              .then(() => {
+                toast.success("Document restored");
+                router.push(`/project/${projectId}/doc/${docId}`);
+              })
+              .catch(() => toast.error("Couldn't undo"));
+          },
+        },
+      });
+      router.push(`/project/${projectId}`);
+    } catch (err) {
+      console.error("Delete failed:", err);
+      toast.error("Couldn't delete this document");
+      setActionBusy(false);
+    }
+  }, [actionBusy, docId, projectId, router]);
 
   const handleInsertCitation = useCallback(
     (citation: { title: string; doi?: string; url: string; text: string }) => {
@@ -274,18 +351,12 @@ export default function EditorPage({
           </span>
         </Link>
 
-        {/* Center: save dot — quietly informative */}
-        <div className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className={`w-1.5 h-1.5 rounded-full transition-colors ${
-              saved ? "bg-green/70" : "bg-warm animate-pulse"
-            }`}
-          />
-          <span className="text-[10px] text-muted tabular-nums">
-            {saved ? "Saved" : "Saving…"}
-          </span>
-        </div>
+        {/* Center: honest save status — reflects every autosave state. */}
+        <SaveStatusIndicator
+          status={autosave.status}
+          onRetry={autosave.retry}
+          onResolveConflict={autosave.resolveKeepMine}
+        />
 
         {/* Right: icon-only affordances */}
         <div className="flex items-center gap-0.5">
@@ -312,8 +383,12 @@ export default function EditorPage({
           <div className="relative">
             <button
               type="button"
-              onClick={() => setShowMenu(!showMenu)}
+              onClick={() => {
+                setShowMenu((v) => !v);
+                setExportOpen(false);
+              }}
               aria-label="More"
+              aria-expanded={showMenu}
               className="p-1.5 text-muted hover:text-foreground hover:bg-foreground/[0.04] rounded transition-colors"
             >
               <MoreHorizontal size={14} strokeWidth={1.75} />
@@ -323,54 +398,96 @@ export default function EditorPage({
                 <>
                   <div
                     className="fixed inset-0 z-40"
-                    onClick={() => setShowMenu(false)}
+                    onClick={() => {
+                      setShowMenu(false);
+                      setExportOpen(false);
+                    }}
                   />
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.14 }}
-                    className="absolute right-0 top-full mt-1 w-44 bg-background border border-border shadow-[0_16px_32px_-16px_rgba(0,0,0,0.25)] overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-1 w-52 bg-background border border-border shadow-[0_16px_32px_-16px_rgba(0,0,0,0.25)] overflow-hidden z-50"
                   >
-                    {[
-                      { icon: Network, label: "Open graph", href: `/project/${projectId}/graph` },
-                      { icon: Download, label: "Export PDF" },
-                      { icon: Copy, label: "Duplicate" },
-                      { icon: Trash2, label: "Delete", danger: true },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      const danger = "danger" in item && item.danger;
-                      const inner = (
-                        <>
-                          <Icon size={13} strokeWidth={1.75} />
-                          <span>{item.label}</span>
-                        </>
-                      );
-                      const className = `w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] transition-colors ${
-                        danger
-                          ? "text-rose/80 hover:text-rose hover:bg-rose/[0.05]"
-                          : "text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04]"
-                      }`;
-                      return "href" in item && item.href ? (
-                        <Link
-                          key={item.label}
-                          href={item.href}
-                          onClick={() => setShowMenu(false)}
-                          className={className}
+                    <Link
+                      href={`/project/${projectId}/graph`}
+                      onClick={() => setShowMenu(false)}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                    >
+                      <Network size={13} strokeWidth={1.75} />
+                      <span>Open graph</span>
+                    </Link>
+
+                    {/* Export — expandable to Markdown / HTML */}
+                    <button
+                      type="button"
+                      onClick={() => setExportOpen((v) => !v)}
+                      aria-expanded={exportOpen}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                    >
+                      <Download size={13} strokeWidth={1.75} />
+                      <span className="flex-1 text-left">Export</span>
+                      <ChevronRight
+                        size={12}
+                        strokeWidth={2}
+                        className={`transition-transform ${exportOpen ? "rotate-90" : ""}`}
+                      />
+                    </button>
+                    <AnimatePresence>
+                      {exportOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.16 }}
+                          className="overflow-hidden bg-surface/60 border-y border-border"
                         >
-                          {inner}
-                        </Link>
+                          <button
+                            type="button"
+                            onClick={handleExportMarkdown}
+                            className="w-full flex items-center gap-2.5 pl-8 pr-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                          >
+                            <FileText size={13} strokeWidth={1.75} />
+                            <span>Markdown (.md)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExportHtml}
+                            className="w-full flex items-center gap-2.5 pl-8 pr-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                          >
+                            <FileCode size={13} strokeWidth={1.75} />
+                            <span>HTML (.html)</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <button
+                      type="button"
+                      onClick={handleDuplicate}
+                      disabled={actionBusy}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors disabled:opacity-50"
+                    >
+                      {actionBusy ? (
+                        <Loader2 size={13} className="animate-spin" />
                       ) : (
-                        <button
-                          key={item.label}
-                          type="button"
-                          onClick={() => setShowMenu(false)}
-                          className={className}
-                        >
-                          {inner}
-                        </button>
-                      );
-                    })}
+                        <Copy size={13} strokeWidth={1.75} />
+                      )}
+                      <span>Duplicate</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmDelete(true);
+                        setShowMenu(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[12px] text-rose/80 hover:text-rose hover:bg-rose/[0.05] transition-colors border-t border-border"
+                    >
+                      <Trash2 size={13} strokeWidth={1.75} />
+                      <span>Delete</span>
+                    </button>
                   </motion.div>
                 </>
               )}
@@ -417,7 +534,7 @@ export default function EditorPage({
             ydoc={ydoc}
             collabSynced={collabSynced}
             onUpdate={handleEditorUpdate}
-            onWordCountChange={setWordCount}
+            onWordCountChange={handleWordCount}
             onReady={(handle) => {
               editorHandleRef.current = handle;
               setEditor(handle.editor);
@@ -476,7 +593,151 @@ export default function EditorPage({
           </>
         ) : null}
       </div>
+
+      {/* ── Delete confirmation ───────────────────────────────── */}
+      <DeleteConfirmModal
+        open={confirmDelete}
+        title={title}
+        busy={actionBusy}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={handleDelete}
+      />
     </div>
+  );
+}
+
+/**
+ * SaveStatusIndicator — honest, never-lying autosave status. Each state
+ * gets its own colour + copy; error and conflict expose an inline action
+ * so the user can recover without leaving the editor.
+ */
+function SaveStatusIndicator({
+  status,
+  onRetry,
+  onResolveConflict,
+}: {
+  status: import("@/hooks/useDocumentAutosave").AutosaveStatus;
+  onRetry: () => void;
+  onResolveConflict: () => void;
+}) {
+  const map = {
+    saved: { dot: "bg-green/70", label: "Saved", pulse: false },
+    dirty: { dot: "bg-warm", label: "Unsaved", pulse: false },
+    saving: { dot: "bg-warm animate-pulse", label: "Saving…", pulse: true },
+    error: { dot: "bg-red", label: "Save failed", pulse: false },
+    conflict: { dot: "bg-red", label: "Edited elsewhere", pulse: false },
+  } as const;
+  const s = map[status];
+  return (
+    <div className="flex items-center gap-1.5">
+      <span aria-hidden className={`w-1.5 h-1.5 rounded-full transition-colors ${s.dot}`} />
+      <span className="text-[10px] text-muted tabular-nums">{s.label}</span>
+      {status === "error" ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="ml-1 inline-flex items-center gap-1 text-[10px] text-violet hover:text-violet/80 transition-colors"
+        >
+          <RefreshCw size={10} strokeWidth={2} />
+          Retry
+        </button>
+      ) : null}
+      {status === "conflict" ? (
+        <button
+          type="button"
+          onClick={onResolveConflict}
+          className="ml-1 inline-flex items-center gap-1 text-[10px] text-violet hover:text-violet/80 transition-colors"
+          title="Overwrite the other change with your current version"
+        >
+          Keep mine
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * DeleteConfirmModal — guards the destructive (soft-delete) action.
+ * Square-edged, violet/rose accented, focus-friendly. Deleting moves the
+ * doc to Trash, so the copy reassures the user it's recoverable.
+ */
+function DeleteConfirmModal({
+  open,
+  title,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <AnimatePresence>
+      {open ? (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            className="fixed inset-0 z-[60] bg-foreground/30 backdrop-blur-sm"
+            onClick={busy ? undefined : onCancel}
+          />
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete document"
+            initial={{ opacity: 0, scale: 0.97, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, y: 8 }}
+            transition={{ duration: 0.18, ease }}
+            className="fixed left-1/2 top-1/2 z-[61] w-[min(92vw,26rem)] -translate-x-1/2 -translate-y-1/2 border border-border bg-background shadow-[0_32px_80px_-32px_rgba(0,0,0,0.5)]"
+          >
+            <div className="px-6 pt-6 pb-5">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 border border-rose/40 bg-rose/[0.06] flex items-center justify-center shrink-0">
+                  <AlertTriangle size={16} className="text-rose" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-display font-bold text-[18px] text-foreground tracking-[-0.02em]">
+                    Delete this document?
+                  </h2>
+                  <p className="text-[12.5px] text-muted mt-1.5 leading-relaxed">
+                    <span className="text-foreground/80 font-medium">
+                      {title || "Untitled document"}
+                    </span>{" "}
+                    will move to Trash. You can restore it any time from
+                    Settings → Trash — nothing is permanently lost.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-surface/50">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={busy}
+                className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted hover:text-foreground px-4 py-2 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={busy}
+                className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-white bg-rose hover:bg-rose/90 px-4 py-2 transition-colors disabled:opacity-50"
+              >
+                {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                Move to Trash
+              </button>
+            </div>
+          </motion.div>
+        </>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
