@@ -55,11 +55,9 @@ import {
   type ComposerAction,
 } from "./ComposerCommandsMenu";
 import type { WorkspaceRef } from "@/hooks/useWorkspaceRefs";
-import type { AiMode, AiModelOption } from "@/lib/ai/models";
-import { GROQ_MODELS, modeLabel } from "@/lib/ai/models";
 
 const EASE = [0.22, 0.61, 0.36, 1] as const;
-const FALLBACK_MODEL_LABEL = "Llama 3.3 70B";
+const FALLBACK_MODEL_LABEL = "Llama 3.1 8B";
 const TOOL_ICONS: Record<string, LucideIcon> = {
   thinking: Brain,
   research_search: SearchIcon,
@@ -102,11 +100,6 @@ interface ChatThreadProps {
   ) => Promise<void>;
   onReset: () => void;
   projectName?: string | null;
-  modelOptions: AiModelOption[];
-  selectedModelId: string;
-  aiMode: AiMode;
-  onModelChange: (modelId: string) => void;
-  onAiModeChange: (mode: AiMode) => void;
 }
 
 export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
@@ -119,11 +112,6 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
       onSend,
       onReset,
       projectName,
-      modelOptions = GROQ_MODELS,
-      selectedModelId = "llama-3.3-70b-versatile",
-      aiMode = "standard",
-      onModelChange = () => {},
-      onAiModeChange = () => {},
     },
     ref,
   ) {
@@ -145,13 +133,7 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
     // pickRef adds visible `@<Title>` token text + remembers the doc
     // id so the chat route can resolve it server-side.
     const { projectId: activeProjectId } = useActiveProject();
-    const safeModelOptions = modelOptions.length > 0 ? modelOptions : GROQ_MODELS;
-    const selectedModel = useMemo(
-      () => safeModelOptions.find((m) => m.id === selectedModelId) ?? safeModelOptions[0],
-      [safeModelOptions, selectedModelId],
-    );
-    const modelLabel = selectedModel?.label ?? FALLBACK_MODEL_LABEL;
-    const availableModes = selectedModel?.modes ?? ["standard"];
+    const modelLabel = FALLBACK_MODEL_LABEL;
     const cmd = useComposerCommands({
       textareaRef: composerRef,
       value: draft,
@@ -442,47 +424,6 @@ export const ChatThread = forwardRef<ChatThreadHandle, ChatThreadProps>(
                 its own modal. Active state replaces the placeholder
                 so the user sees who they're talking to. */}
             <div className="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-muted font-medium flex-wrap">
-              <select
-                value={selectedModelId}
-                onChange={(e) => onModelChange(e.target.value)}
-                disabled={sending}
-                aria-label="AI model"
-                className="bg-transparent border border-border px-1.5 py-1 text-[10px] uppercase tracking-[0.12em] text-muted hover:text-foreground focus:outline-none focus:border-violet/50 disabled:opacity-50"
-              >
-                {safeModelOptions.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-border">/</span>
-              <div className="inline-flex items-center border border-border">
-                {(["standard", "thinking", "reasoning"] as AiMode[]).map((mode) => {
-                  const supported = availableModes.includes(mode);
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      disabled={!supported || sending}
-                      onClick={() => onAiModeChange(mode)}
-                      aria-pressed={aiMode === mode}
-                      title={
-                        supported
-                          ? `${modeLabel(mode)} mode`
-                          : `${modelLabel} does not support ${modeLabel(mode)} mode`
-                      }
-                      className={`px-2 py-1 transition-colors ${
-                        aiMode === mode && supported
-                          ? "bg-foreground text-background"
-                          : "text-muted hover:text-foreground disabled:opacity-35 disabled:hover:text-muted"
-                      }`}
-                    >
-                      {modeLabel(mode)}
-                    </button>
-                  );
-                })}
-              </div>
-              <span className="text-border">/</span>
               <span>Enter sends · Shift + Enter newline</span>
               <span className="text-border ml-auto">·</span>
               <button

@@ -41,7 +41,7 @@ import {
 } from "@/lib/server/rate-limit";
 import { type ChatMessage } from "@/lib/ai/groq";
 import { GroqApiError } from "@/lib/ai/groq";
-import { resolveGroqModeConfig } from "@/lib/ai/models";
+import { chatModelConfig } from "@/lib/ai/models";
 import { runAgent } from "@/lib/ai/agent";
 import { buildRegistry } from "@/lib/ai/tools/registry";
 import {
@@ -193,10 +193,7 @@ export async function POST(request: Request) {
   const registry = buildRegistry({
     groups: ["docs", "projects", "research"],
   });
-  const modelConfig = resolveGroqModeConfig({
-    model: typeof body.modelId === "string" ? body.modelId : null,
-    mode: typeof body.aiMode === "string" ? body.aiMode : null,
-  });
+  const modelConfig = chatModelConfig();
 
   const messages: ChatMessage[] = [
     ...trimmed.map(
@@ -222,8 +219,6 @@ export async function POST(request: Request) {
       },
       model: modelConfig.model,
       maxCompletionTokens: modelConfig.maxCompletionTokens,
-      reasoningEffort: modelConfig.reasoningEffort,
-      reasoningFormat: modelConfig.reasoningFormat,
       maxTurns: 6,
       temperature: 0.5,
       perCallTimeoutMs: 30_000,

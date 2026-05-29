@@ -17,8 +17,9 @@ import { FieldValue } from "firebase-admin/firestore";
 import type { Tool, ToolContext } from "./types";
 import { toolError } from "./types";
 
-type ResearchMode = "lightning" | "reasoning" | "deep";
-const VALID_MODES: ResearchMode[] = ["lightning", "reasoning", "deep"];
+/* The project `mode` field persists in Firestore for back-compat, but it is
+ * no longer user/agent-selectable — every project uses one default. */
+const DEFAULT_MODE = "reasoning";
 
 /* ─────────────────────────── list ─────────────────────────── */
 
@@ -79,11 +80,6 @@ const createProject: Tool = {
         type: "object",
         properties: {
           name: { type: "string", description: "Project name." },
-          mode: {
-            type: "string",
-            enum: VALID_MODES,
-            description: "Research mode (default: reasoning).",
-          },
           systemInstructions: {
             type: "string",
             description: "Optional guidance for how the AI should work in this project.",
@@ -96,9 +92,6 @@ const createProject: Tool = {
   handler: async (args, ctx: ToolContext) => {
     const name = typeof args.name === "string" ? args.name.trim() : "";
     if (!name) return toolError("name is required");
-    const mode: ResearchMode = VALID_MODES.includes(args.mode as ResearchMode)
-      ? (args.mode as ResearchMode)
-      : "reasoning";
     const systemInstructions =
       typeof args.systemInstructions === "string" ? args.systemInstructions : "";
 
@@ -119,7 +112,7 @@ const createProject: Tool = {
     await ref.set({
       userId: ctx.uid,
       name,
-      mode,
+      mode: DEFAULT_MODE,
       systemInstructions,
       queryCount: 0,
       docCount: 0,

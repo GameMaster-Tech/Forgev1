@@ -28,7 +28,7 @@ import {
   type FirestoreMessage,
 } from "@/lib/firebase/conversations";
 import { useChatStream } from "./useChatStream";
-import type { AiMode } from "@/lib/ai/models";
+import { CHAT_MODEL } from "@/lib/ai/models";
 
 export interface ChatTurn {
   id: string;
@@ -77,9 +77,6 @@ export interface UseChatThreadOptions {
   projectName?: string | null;
   /** Existing conversation to resume, when known. */
   initialConversationId?: string | null;
-  /** Override the default model — passes through to `createConversation`. */
-  modelId?: string;
-  aiMode?: AiMode;
   showTrace?: boolean;
 }
 
@@ -131,8 +128,6 @@ export function useChatThread({
   projectId,
   projectName,
   initialConversationId,
-  modelId = "llama-3.3-70b-versatile",
-  aiMode = "standard",
   showTrace = false,
 }: UseChatThreadOptions): UseChatThreadApi {
   const [conversationId, setConversationId] = useState<string | null>(
@@ -196,8 +191,8 @@ export function useChatThread({
       const promise = createConversation(user.uid, {
         projectId: storageProjectId,
         title: titleSeed,
-        mode: aiMode === "standard" ? "lightning" : aiMode === "thinking" ? "reasoning" : "deep",
-        modelId,
+        mode: "reasoning",
+        modelId: CHAT_MODEL,
       }).then((id) => {
         setConversationId(id);
         creatingRef.current = null;
@@ -206,7 +201,7 @@ export function useChatThread({
       creatingRef.current = promise;
       return promise;
     },
-    [conversationId, projectId, modelId, aiMode],
+    [conversationId, projectId],
   );
 
   const send = useCallback(
@@ -276,8 +271,6 @@ export function useChatThread({
         const result = await streamAgent({
           projectId,
           projectName: projectName ?? null,
-          modelId,
-          aiMode,
           userMessage: trimmed,
           // Filter out system turns — the API only accepts user / assistant.
           history: history.map(({ role, content }) => ({
@@ -411,7 +404,7 @@ export function useChatThread({
           projectId: storageProjectId,
           role: "assistant",
           content: reply,
-          modelId,
+          modelId: CHAT_MODEL,
         });
         setMessages((prev) =>
           prev.map((m) =>
@@ -442,7 +435,7 @@ export function useChatThread({
         setSending(false);
       }
     },
-    [projectId, projectName, ensureConversation, messages, modelId, aiMode, showTrace, streamAgent, setMessages],
+    [projectId, projectName, ensureConversation, messages, showTrace, streamAgent, setMessages],
   );
 
   /**

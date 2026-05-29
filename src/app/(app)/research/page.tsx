@@ -8,13 +8,12 @@
  * without an active project.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { ChatThread, type ChatThreadHandle } from "@/components/research/ChatThread";
 import { useChatThread } from "@/hooks/useChatThread";
 import { useActiveProject } from "@/hooks/useActiveProject";
 import { useProjectsStore } from "@/store/projects";
-import { GROQ_MODELS, type AiMode, type AiModelOption } from "@/lib/ai/models";
 
 export default function ResearchPage() {
   const { projectId } = useActiveProject();
@@ -30,42 +29,11 @@ export default function ResearchPage() {
   const initialConversationId = search?.get("c") ?? null;
   // `?ask=<text>` seeds the composer (used by the ⌘K "Ask Forge" row).
   const askParam = search?.get("ask") ?? null;
-  const [modelOptions, setModelOptions] = useState<AiModelOption[]>(GROQ_MODELS);
-  const [selectedModelId, setSelectedModelId] = useState("llama-3.3-70b-versatile");
-  const [aiMode, setAiMode] = useState<AiMode>("standard");
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/ai/models", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data: { models?: AiModelOption[] }) => {
-        if (cancelled || !Array.isArray(data.models) || data.models.length === 0) return;
-        setModelOptions(data.models);
-        setSelectedModelId((current) =>
-          data.models!.some((m) => m.id === current) ? current : data.models![0].id,
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const selectedModel = useMemo(
-    () => modelOptions.find((m) => m.id === selectedModelId) ?? modelOptions[0],
-    [modelOptions, selectedModelId],
-  );
-
-  const effectiveAiMode = selectedModel?.modes.includes(aiMode)
-    ? aiMode
-    : selectedModel?.defaultMode ?? "standard";
 
   const thread = useChatThread({
     projectId,
     projectName,
     initialConversationId,
-    modelId: selectedModelId,
-    aiMode: effectiveAiMode,
   });
 
   const threadRef = useRef<ChatThreadHandle | null>(null);
@@ -90,17 +58,6 @@ export default function ResearchPage() {
         onSend={thread.send}
         onReset={thread.reset}
         projectName={projectName}
-        modelOptions={modelOptions}
-        selectedModelId={selectedModelId}
-        aiMode={effectiveAiMode}
-        onModelChange={(modelId) => {
-          setSelectedModelId(modelId);
-          const nextModel = modelOptions.find((m) => m.id === modelId);
-          if (nextModel && !nextModel.modes.includes(aiMode)) {
-            setAiMode(nextModel.defaultMode);
-          }
-        }}
-        onAiModeChange={setAiMode}
       />
     </div>
   );

@@ -17,7 +17,6 @@
 import { useCallback, useRef } from "react";
 import { auth } from "@/lib/firebase/config";
 import type { AgentEvent } from "@/lib/ai/agent";
-import type { AiMode } from "@/lib/ai/models";
 
 export type { AgentEvent };
 
@@ -35,8 +34,6 @@ async function freshAuthHeaders(): Promise<Record<string, string>> {
 export interface ChatStreamRequest {
   projectId: string | null;
   projectName: string | null;
-  modelId?: string;
-  aiMode?: AiMode;
   userMessage: string;
   history: { role: "user" | "assistant"; content: string }[];
   systemPrompt?: string;
@@ -86,8 +83,6 @@ export function useChatStream(): (req: ChatStreamRequest) => Promise<ChatStreamR
       body: JSON.stringify({
         projectId: req.projectId,
         projectName: req.projectName,
-        modelId: req.modelId,
-        aiMode: req.aiMode,
         userMessage: req.userMessage,
         history: req.history,
         ...(req.systemPrompt ? { systemPrompt: req.systemPrompt } : {}),

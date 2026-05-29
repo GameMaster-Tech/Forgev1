@@ -13,8 +13,6 @@ import { useRouter } from "next/navigation";
 import {
   X,
   Zap,
-  Brain,
-  Microscope,
   ArrowRight,
   ArrowLeft,
   Sparkles,
@@ -22,7 +20,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useProjectsStore, type ResearchMode } from "@/store/projects";
+import { useProjectsStore } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 
@@ -33,53 +31,20 @@ interface NewProjectModalProps {
   onClose: () => void;
 }
 
-type ModeSpec = {
-  id: ResearchMode;
-  label: string;
-  description: string;
-  detail: string;
-  icon: typeof Zap;
-  accent: string;
-  accentBg: string;
-  dots: number;
-  features: string[];
+// Mode selection was removed (single model, no research tiers). One neutral
+// workspace spec drives the step-2 summary card.
+const WORKSPACE_SPEC = {
+  label: "Workspace",
+  detail: "AI-native · reactive",
+  icon: Zap,
+  accent: "text-violet",
+  accentBg: "bg-violet",
+  features: [
+    "An AI assistant that creates and edits docs for you",
+    "Living sections that keep themselves current",
+    "Search across everything you write",
+  ],
 };
-
-const MODES: ModeSpec[] = [
-  {
-    id: "lightning",
-    label: "Lightning",
-    description: "Snappy chat. Surface answers fast.",
-    detail: "3 sources · abstract-only · ~5s",
-    icon: Zap,
-    accent: "text-warm",
-    accentBg: "bg-warm",
-    dots: 3,
-    features: ["3 sources per query", "Abstract-only analysis", "≈ 5 second response"],
-  },
-  {
-    id: "reasoning",
-    label: "Reasoning",
-    description: "Step-by-step with verification.",
-    detail: "5 sources · highlights · DOI verify",
-    icon: Brain,
-    accent: "text-cyan",
-    accentBg: "bg-cyan",
-    dots: 5,
-    features: ["5 sources per query", "Key highlights extracted", "DOI verification"],
-  },
-  {
-    id: "deep",
-    label: "Deep Research",
-    description: "Long synthesis across project memory.",
-    detail: "10 sources · full-text · cross-ref",
-    icon: Microscope,
-    accent: "text-rose",
-    accentBg: "bg-rose",
-    dots: 10,
-    features: ["10+ sources per query", "Full-text analysis", "Cross-reference checking"],
-  },
-];
 
 const SUGGESTIONS = [
   "Focus on peer-reviewed sources from 2020-2026",
@@ -96,7 +61,6 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
 
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<ResearchMode>("reasoning");
   const [instructions, setInstructions] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -104,7 +68,6 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
   const reset = () => {
     setStep(1);
     setName("");
-    setMode("reasoning");
     setInstructions("");
     setCreating(false);
     setError("");
@@ -125,7 +88,7 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
       const id = await Promise.race([
         addProject(user.uid, {
           name: name.trim(),
-          mode,
+          mode: "reasoning",
           systemInstructions: instructions.trim(),
         }),
         new Promise<never>((_, reject) =>
@@ -145,7 +108,7 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
     }
   };
 
-  const selected = MODES.find((m) => m.id === mode)!;
+  const selected = WORKSPACE_SPEC;
 
   return (
     <AnimatePresence>
@@ -243,66 +206,6 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
                           if (e.key === "Enter" && name.trim()) setStep(2);
                         }}
                       />
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2.5 mb-3">
-                        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted tabular-nums">
-                          02
-                        </span>
-                        <div className="w-5 h-px bg-border" />
-                        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-foreground">
-                          Research mode
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 border border-border">
-                        {MODES.map((m, idx) => {
-                          const Icon = m.icon;
-                          const sel = mode === m.id;
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => setMode(m.id)}
-                              className={`relative text-left p-4 transition-colors duration-150 ${
-                                idx > 0 ? "sm:border-l border-border" : ""
-                              } ${sel ? "bg-violet/[0.04]" : "bg-surface hover:bg-background/60"}`}
-                            >
-                              {sel && <div className="absolute top-0 left-0 w-[2px] h-full bg-violet" />}
-                              <div className="flex items-start justify-between mb-3">
-                                <div
-                                  className={`w-9 h-9 border flex items-center justify-center transition-colors ${
-                                    sel ? "border-violet/30 bg-background" : "border-border bg-background"
-                                  }`}
-                                >
-                                  <Icon size={15} strokeWidth={1.75} className={sel ? m.accent : "text-muted"} />
-                                </div>
-                                {sel && (
-                                  <span className="text-[9px] font-medium uppercase tracking-[0.15em] text-violet">
-                                    Selected
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="flex gap-[2px] mb-2">
-                                {Array.from({ length: m.dots }).map((_, i) => (
-                                  <div
-                                    key={i}
-                                    className={`h-[2px] flex-1 transition-colors ${sel ? m.accentBg : "bg-border"}`}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-[9px] uppercase tracking-[0.12em] text-muted tabular-nums font-medium">
-                                {m.dots} sources
-                              </span>
-
-                              <h4 className="font-display text-[15px] font-semibold text-foreground tracking-[-0.01em] mt-3 mb-1">
-                                {m.label}
-                              </h4>
-                              <p className="text-[11px] text-muted leading-relaxed">{m.description}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
                     </div>
 
                     <div className="flex justify-end mt-7">
