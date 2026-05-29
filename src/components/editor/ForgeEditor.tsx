@@ -14,6 +14,7 @@ import { InlineMath, BlockMath } from "./extensions/Math";
 import { ClaimMention, type ClaimTrustResolver } from "./extensions/ClaimMention";
 import { DataTable } from "./extensions/DataTable";
 import { InlineEmbed } from "./extensions/InlineEmbed";
+import { LivingSection } from "./extensions/LivingSection/extension";
 import { CommentMark } from "./extensions/CommentMark";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { filterSlashCommands, type SlashCommand } from "./slashCommands";
@@ -795,6 +796,7 @@ export default function ForgeEditor({
       BlockMath,
       DataTable,
       InlineEmbed,
+      LivingSection,
       CommentMark,
       ClaimMention.configure({
         resolveTrust: (key) => claimResolverRef.current?.(key) ?? null,

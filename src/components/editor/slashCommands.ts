@@ -23,6 +23,7 @@ import {
   Code,
   Table,
   Type,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -116,6 +117,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     icon: Table,
     keywords: ["table", "database", "grid", "rows", "columns"],
     run: (editor) => editor.chain().focus().insertDataTable().run(),
+  },
+  {
+    id: "living-section",
+    label: "Living section",
+    hint: "AI-derived content that keeps itself current",
+    icon: Sparkles,
+    keywords: ["living", "reactive", "ai", "summary", "derived", "auto", "self-updating"],
+    run: (editor) => editor.chain().focus().insertLivingSection().run(),
   },
 ];
 
