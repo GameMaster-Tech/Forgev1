@@ -1,86 +1,87 @@
-# Forge → AI-Native Workspace — Execution Plan (v4)
+# Forge → AI-Native Reactive Workspace — Execution Plan (v5)
 
-> Status: **active.** Decisions locked: **full research purge** + flagship
-> **Living Pages** (concept being refined). Backend pivots to serve it.
+> Status: **active.** Direction locked: a general **AI-Native Workspace** that is
+> **reactive** (AI *and* reactive — not just one). P0 de-link committed
+> (`d448bc7`). Now: design the feature set, build it, then pivot the backend.
 
-## 0. Direction
+## 0. The paradigm
 
-Forge becomes a **lean, general AI-native workspace** judged by **autonomy,
-comfort, speed**. The research/verification subsystem is being removed entirely,
-and the backend re-pointed at a single novel capability: **Living Pages**.
+Forge's edge: **content has dependencies, and AI propagates *meaning* through
+them.** Think a spreadsheet's reactive formula graph — but the cells are
+free-form knowledge and "recompute" is AI synthesis. No mainstream workspace
+does true semantic reactivity over prose (Notion synced-blocks are literal
+copies; DB formulas only work on structured fields).
 
-Competitive scan (May 2026) confirmed: the category converged on agents,
-auto-organization, Q&A, and multi-format generation. "Self-updating documents"
-exists only in **publishing/docs/KB** niches (GitBook sync, Code-to-Docs, living
-style guides) and experiments (Karpathy's wiki). **No one ships autonomous,
-self-maintaining synthesis as a general personal-workspace primitive.** That is
-the lane.
+**Forge already owns the engine to do this.** `forge-graph` ("Forge Reactive
+Workspace") is a dependency DAG with `upstream/downstreamDependencies`,
+`STABLE/CONFLICTED/DRIFTING` status, per-node semantic embeddings, versioned
+propagation, and adapters that already turn **documents + editor content** into
+nodes. Today it only drives calendar/claims. **We generalize it to all content.**
+(This reverses the earlier "purge the engine" plan: we purge the research
+*surfaces*, keep + upgrade the *engine*.)
 
-## 1. Target surface (keep / remove)
+## 1. Feature set (designed now → built next)
 
-**Keep (general workspace):** Projects, Documents/editor, Research chat (general
-AI assistant), Calendar (general scheduling), Activity, Teams, Settings, ⌘K.
+### F1 — Reactors  *(novel · flagship)*
+A block whose content is **derived by a natural-language rule over sources** and
+**recomputes itself when those sources change.**
 
-**Remove (research/verification machinery — the "full purge"):**
-- **Pulse** — assertion freshness + refactors (`/pulse`, `/api/pulse/*`,
-  `usePulseWorkspace`, `useFreshnessScan`, `lib/firestore/pulse`,
-  `forge-graph/adapters/pulse-blocks`).
-- **Checks** — in-editor contradiction/claim checking (`/api/ai/check-claims`,
-  `useDocContradictions`, `useProjectContradictions`, `ClaimCheckPanel`,
-  `ContradictionBanner`, claim pills / `ClaimMention`).
-- **Sync** — conflicts/constraints/invariants (`/sync`, `SyncProvider`).
-- **Echo** — semantic reactivity (`useSemanticReactivity`, `SemanticFlash`,
-  Echo bell/tray, `/api/forge-graph/semantic-check`).
-- **forge-graph reasoning** + **Tempo** agent + impact-simulator **Preview** —
-  the claim/graph reasoning layer, once nothing general depends on it.
-- `/api/ai/write`'s research framing → folded into the new backend.
+- You write a rule: `↻ summary of {Atlas notes}`, `↻ open questions across {these
+  3 docs}`, `↻ current pricing from {Pricing}`.
+- AI computes the derived content; the Reactor records a dependency on its
+  sources.
+- When a source changes, the Reactor is marked `drifting` and re-synthesizes
+  (per the autonomy setting) — **reactive, AI-native, composable.**
+- This is the diverse/innovative evolution of "Living Pages": composable derived
+  *blocks*, not just whole-page synthesis.
 
-**Dependency note (why this is sequenced, not one delete):** `CalendarProvider`
-and `SyncProvider` import Pulse; `forge-graph/builder` uses `pulse-blocks`;
-`forge-graph` is shared by Tempo/Calendar/Echo; `semantic-check` is shared by
-Echo. Each removal must untangle these and stay green.
+### F2 — Ripples  *(novel · flagship)*
+The **push** direction. When you edit content, Forge uses the dependency graph +
+semantic similarity to find **downstream content that just went stale** and
+surfaces it: *"You changed the launch date here — it's referenced in 3 places."*
+One tap reconciles them (AI updates the dependents).
 
-## 2. Purge sequence (each checkpoint ends green: tsc + lint + build)
+- AI-native: detects *semantic* dependents, reconciles via LLM.
+- Reactive: change propagation through the graph.
+- Nothing mainstream propagates *meaning* changes across free-form docs.
 
-- **P0 — De-link (DONE this checkpoint).** Remove Pulse/Checks(Sync)/Preview
-  from sidebar, mobile nav, and the ⌘K command set. Routes still exist
-  transiently; the workspace *surface* is already lean.
-- **P1 — Editor de-research.** Strip Checks from the editor (ContradictionBanner,
-  ClaimCheckPanel, `useDocContradictions`, claim pills) + delete `check-claims`.
-- **P2 — Remove Sync** (routes + `SyncProvider`); untangle Calendar's Pulse dep.
-- **P3 — Remove Pulse** (routes/APIs/hooks/lib/adapter).
-- **P4 — Remove Echo** (reactivity, flash, bell/tray, `semantic-check`).
-- **P5 — Remove forge-graph reasoning / Tempo / Preview** once orphaned; prune
-  onboarding (Tutorial) + landing copy of research framing.
+### Semi — Drift  *(supporting)*
+A calm, ambient **reactive-status affordance** reusing the engine's
+`STABLE / DRIFTING / CONFLICTED` states: a margin dot/chip on reactive content
+showing whether it's current, with one-tap **Reconcile now**. Makes F1 + F2
+visible and trustworthy. Small, shared glue.
 
-## 3. Backend pivot (after the surface is lean)
+## 2. Architecture upgrade (the backend pivot)
 
-Replace the claim/freshness/contradiction backend with a **Living Pages service**:
-- **Content model:** every page can be `static` or `living` (`spec` = the
-  intent, `sources` = scope, `lastSynthesisAt`, `revision`).
-- **Synthesis worker:** on relevant change (debounced) or on demand, gather the
-  semantically-relevant workspace content (surgical embeddings via the existing
-  embed endpoint) and have Groq **rewrite/reconcile** the page, preserving the
-  user's edits where possible.
-- **Speed:** incremental (only re-synthesize affected sections), cached by
-  content hash, streamed.
-- Reuse the Groq + auth + rate-limit helpers. No store-everything vectors.
+Generalize `forge-graph` from calendar/claims to **content reactivity**:
+- A `reactive/` layer: a `Reactor` model (rule, source refs, last value, source
+  hash, status) persisted in Firestore; a dependency index over content.
+- **Recompute service** — `POST /api/ai/reactor`: given a rule + resolved source
+  text, Groq synthesizes the derived content (HTML fragment). Debounced, cached
+  by source-content hash, incremental.
+- **Propagation** — on save, embed the changed block (existing embed endpoint),
+  find dependents (graph edges + cosine), mark them `drifting` → drives Ripples
+  + Drift.
+- Reuse Groq + auth + rate-limit helpers and the `forge-graph` adapters
+  (`documents`, `tiptap`). Surgical embeddings; no store-everything vectors.
+- Fold the research backend (`check-claims`, pulse APIs) out as surfaces are
+  removed (P1–P3 below); keep `semantic-check`/embed as reactive primitives.
 
-## 4. Flagship: Living Pages (REFINING — open design choices)
+## 3. Checkpoints (each green: tsc + lint + build; I report)
 
-A page defined by *intent* that Forge keeps synthesized and current autonomously.
-Open questions to lock the concept (pending user steer):
+- **P0 — De-link research surfaces.** DONE (`d448bc7`).
+- **R1 — Reactor foundation.** `reactive/types.ts` + `POST /api/ai/reactor`
+  recompute endpoint. (This checkpoint.)
+- **R2 — Reactor in the editor.** A reactive block node + a hook that resolves
+  sources, calls recompute, renders + caches; manual refresh first.
+- **R3 — Drift (semi).** Source-hash staleness → `drifting` status + Reconcile
+  affordance; then autonomous refresh.
+- **R4 — Ripples.** Propagation on save → downstream stale detection + one-tap
+  reconcile.
+- **R5 — Remove research surfaces' dead code** (Pulse/Checks/Sync routes) now
+  that nav is clean; reframe onboarding/landing around reactivity.
 
-1. **Trigger / autonomy level** — fully autonomous background refresh, vs. "stale"
-   badge + one-tap refresh, vs. on-open refresh? (comfort vs. control)
-2. **Scope of integration** — whole workspace, a chosen project, or explicit
-   linked sources?
-3. **Edit reconciliation** — may it rewrite text the user hand-edited, or only
-   append/update AI-owned regions? (trust)
-4. **Granularity** — a whole living *page*, or living *blocks* embeddable in any
-   doc?
+## 4. Out of scope (now)
 
-## 5. Out of scope
-
-Autonomous task-agents, ANN/vector index, multi-modal, the unbuilt
-Veritas/Forge-SAI model.
+Autonomous task-agents, ANN index, multi-modal, the unbuilt Veritas/Forge-SAI
+model, claim extraction in the core path.
