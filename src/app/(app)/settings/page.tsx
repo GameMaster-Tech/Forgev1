@@ -18,21 +18,31 @@ import {
   LogOut,
   Loader2,
   AlertTriangle,
+  Palette,
+  Monitor,
+  Sun,
+  Moon,
+  Type,
+  Activity,
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import { updateProfile } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 import { signOut } from "@/lib/firebase/auth";
 import { db } from "@/lib/firebase/config";
+import { useAppearance, type TextScale } from "@/store/appearance";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
-type SettingsTab = "profile" | "api" | "preferences";
+type SettingsTab = "profile" | "appearance" | "api" | "preferences";
 
 const tabs: { id: SettingsTab; label: string; icon: typeof User; color: string }[] = [
   { id: "profile", label: "Profile", icon: User, color: "cyan" },
+  { id: "appearance", label: "Appearance", icon: Palette, color: "violet" },
   { id: "api", label: "API & Integrations", icon: Key, color: "warm" },
   { id: "preferences", label: "Preferences", icon: Bell, color: "green" },
 ];
@@ -69,6 +79,13 @@ export default function SettingsPage() {
   const [synthesisMode, setSynthesisMode] = useState(defaultPreferences.synthesisMode);
 
   const [showExaKey, setShowExaKey] = useState(false);
+
+  // Appearance — colour theme (next-themes) + client display prefs.
+  const { theme, setTheme } = useTheme();
+  const textScale = useAppearance((s) => s.textScale);
+  const setTextScale = useAppearance((s) => s.setTextScale);
+  const reduceMotion = useAppearance((s) => s.reduceMotion);
+  const setReduceMotion = useAppearance((s) => s.setReduceMotion);
 
   useEffect(() => {
     if (user) {
@@ -126,9 +143,15 @@ export default function SettingsPage() {
       );
 
       setSaved(true);
+      toast.success("Settings saved", {
+        description: "Your profile and preferences are up to date.",
+      });
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error("Failed to save settings:", err);
+      toast.error("Couldn't save settings", {
+        description: "Something went wrong. Please try again.",
+      });
     } finally {
       setSaving(false);
     }
@@ -340,6 +363,127 @@ export default function SettingsPage() {
                         )}
                         {signingOut ? "Signing out..." : "Sign out"}
                       </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "appearance" && (
+                <div className="space-y-6">
+                  {/* Theme */}
+                  <div className="border border-border bg-white/70 dark:bg-surface/70 backdrop-blur-sm p-6">
+                    <h2 className="text-sm text-black dark:text-foreground font-semibold mb-1.5 flex items-center gap-2">
+                      <div className="w-7 h-7 bg-violet/10 flex items-center justify-center">
+                        <Palette size={13} className="text-violet" />
+                      </div>
+                      Theme
+                    </h2>
+                    <p className="text-[11px] text-muted mb-5 ml-9">
+                      Applies instantly. &ldquo;System&rdquo; follows your device&apos;s light / dark setting.
+                    </p>
+                    <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Theme">
+                      {([
+                        { value: "light", label: "Light", icon: Sun },
+                        { value: "dark", label: "Dark", icon: Moon },
+                        { value: "system", label: "System", icon: Monitor },
+                      ] as const).map((opt) => {
+                        const Icon = opt.icon;
+                        const active = (theme ?? "system") === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => {
+                              setTheme(opt.value);
+                              toast.success(`${opt.label} theme`);
+                            }}
+                            className={`flex flex-col items-center gap-2 px-3 py-4 border transition-colors duration-200 ${
+                              active
+                                ? "border-violet bg-violet/8 text-violet"
+                                : "border-border text-gray hover:text-black dark:hover:text-foreground hover:border-black/20 dark:hover:border-white/20"
+                            }`}
+                          >
+                            <Icon size={18} strokeWidth={active ? 2.25 : 1.75} />
+                            <span className="text-[12px] font-medium">{opt.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Text size */}
+                  <div className="border border-border bg-white/70 dark:bg-surface/70 backdrop-blur-sm p-6">
+                    <h2 className="text-sm text-black dark:text-foreground font-semibold mb-1.5 flex items-center gap-2">
+                      <div className="w-7 h-7 bg-cyan/10 flex items-center justify-center">
+                        <Type size={13} className="text-cyan" />
+                      </div>
+                      Text size
+                    </h2>
+                    <p className="text-[11px] text-muted mb-5 ml-9">
+                      Scales the entire interface for comfort and readability.
+                    </p>
+                    <div className="flex gap-2" role="radiogroup" aria-label="Text size">
+                      {([
+                        { value: "sm", label: "Small", px: "text-[12px]" },
+                        { value: "base", label: "Default", px: "text-[14px]" },
+                        { value: "lg", label: "Large", px: "text-[17px]" },
+                      ] as const).map((opt) => {
+                        const active = textScale === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setTextScale(opt.value as TextScale)}
+                            className={`flex-1 flex flex-col items-center gap-1.5 py-3.5 border transition-colors duration-200 ${
+                              active
+                                ? "border-cyan text-cyan bg-cyan/8"
+                                : "border-border text-gray hover:text-black dark:hover:text-foreground hover:border-black/20 dark:hover:border-white/20"
+                            }`}
+                          >
+                            <span className={`${opt.px} font-semibold leading-none`}>Aa</span>
+                            <span className="text-[11px] font-medium">{opt.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Motion */}
+                  <div className="border border-border bg-white/70 dark:bg-surface/70 backdrop-blur-sm p-6">
+                    <h2 className="text-sm text-black dark:text-foreground font-semibold mb-1.5 flex items-center gap-2">
+                      <div className="w-7 h-7 bg-green/10 flex items-center justify-center">
+                        <Activity size={13} className="text-green" />
+                      </div>
+                      Reduce motion
+                    </h2>
+                    <p className="text-[11px] text-muted mb-5 ml-9">
+                      Minimise animations and transitions. &ldquo;System&rdquo; honours your OS accessibility setting.
+                    </p>
+                    <div className="flex gap-2" role="radiogroup" aria-label="Reduce motion">
+                      {([
+                        { value: "system", label: "System" },
+                        { value: "on", label: "On" },
+                        { value: "off", label: "Off" },
+                      ] as const).map((opt) => {
+                        const active = reduceMotion === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setReduceMotion(opt.value)}
+                            className={`flex-1 py-2.5 text-[12px] font-medium border transition-colors duration-200 ${
+                              active
+                                ? "border-green text-green bg-green/8"
+                                : "border-border text-gray hover:text-black dark:hover:text-foreground hover:border-black/20 dark:hover:border-white/20"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

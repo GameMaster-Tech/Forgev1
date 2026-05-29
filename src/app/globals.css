@@ -1056,6 +1056,29 @@ a {
   .ProseMirror { animation: none; }
 }
 
+/* User-forced reduced motion (Settings → Appearance → "Reduce motion: On").
+ * Mirrors the OS media query above so CSS transitions/animations collapse
+ * regardless of the system setting. Framer-motion is handled separately via
+ * <MotionConfig reducedMotion="always">. */
+html[data-reduce-motion="on"] *,
+html[data-reduce-motion="on"] *::before,
+html[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-reduce-motion="on"] button:active:not(:disabled) { transform: none; }
+html[data-reduce-motion="on"] .forge-lift:hover { transform: none; box-shadow: none; }
+html[data-reduce-motion="on"] .forge-fade-in { animation: none; }
+
+/* Global UI scale (Settings → Appearance → "Text size").
+ * `zoom` scales every dimension proportionally — including the many
+ * px-based type sizes in the design system — giving a true editor-style
+ * zoom rather than only touching rem-based utilities. */
+html[data-text-scale="sm"] { zoom: 0.92; }
+html[data-text-scale="lg"] { zoom: 1.08; }
+
 /*
  * Accent colour overrides for elements rendered on the dark
  * `bg-foreground` surfaces (sidebar, dark TempoVerdict card,

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { AppearanceProvider } from "@/components/AppearanceProvider";
 import { AuthProvider } from "@/context/AuthContext";
+import { Toaster } from "@/components/ui/Toaster";
 
 // ── Self-hosted brand fonts ─────────────────────────────────────────
 // We ship Urbanist (display) and DM Sans (body) via @fontsource so
@@ -55,9 +57,12 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <ThemeProvider>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
+          <AppearanceProvider>
+            <AuthProvider>
+              {children}
+            </AuthProvider>
+            <Toaster />
+          </AppearanceProvider>
         </ThemeProvider>
       </body>
     </html>

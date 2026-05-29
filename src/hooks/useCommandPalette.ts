@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useMemo } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 export type CommandKind =
   | "assertion"
@@ -75,36 +76,49 @@ interface CommandStore {
   togglePin: (id: string) => void;
 }
 
-const useCommandStore = create<CommandStore>((set) => ({
-  sources: new Map(),
-  recents: [],
-  pinned: [],
-  isOpen: false,
-  open: () => set({ isOpen: true }),
-  close: () => set({ isOpen: false }),
-  toggle: () => set((s) => ({ isOpen: !s.isOpen })),
-  registerSource: (sourceId, items) =>
-    set((s) => {
-      const next = new Map(s.sources);
-      next.set(sourceId, items);
-      return { sources: next };
+// Only `recents` + `pinned` survive a reload — they're the user's
+// curated/learned shortcuts and should feel sticky across sessions.
+// `sources` is a live Map rebuilt by each page on mount (and isn't
+// JSON-serialisable), and `isOpen` must always boot closed.
+const useCommandStore = create<CommandStore>()(
+  persist(
+    (set) => ({
+      sources: new Map(),
+      recents: [],
+      pinned: [],
+      isOpen: false,
+      open: () => set({ isOpen: true }),
+      close: () => set({ isOpen: false }),
+      toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+      registerSource: (sourceId, items) =>
+        set((s) => {
+          const next = new Map(s.sources);
+          next.set(sourceId, items);
+          return { sources: next };
+        }),
+      unregisterSource: (sourceId) =>
+        set((s) => {
+          const next = new Map(s.sources);
+          next.delete(sourceId);
+          return { sources: next };
+        }),
+      recordSelection: (id) =>
+        set((s) => {
+          const next = [id, ...s.recents.filter((r) => r !== id)].slice(0, 8);
+          return { recents: next };
+        }),
+      togglePin: (id) =>
+        set((s) => ({
+          pinned: s.pinned.includes(id) ? s.pinned.filter((p) => p !== id) : [...s.pinned, id].slice(0, 16),
+        })),
     }),
-  unregisterSource: (sourceId) =>
-    set((s) => {
-      const next = new Map(s.sources);
-      next.delete(sourceId);
-      return { sources: next };
-    }),
-  recordSelection: (id) =>
-    set((s) => {
-      const next = [id, ...s.recents.filter((r) => r !== id)].slice(0, 8);
-      return { recents: next };
-    }),
-  togglePin: (id) =>
-    set((s) => ({
-      pinned: s.pinned.includes(id) ? s.pinned.filter((p) => p !== id) : [...s.pinned, id].slice(0, 16),
-    })),
-}));
+    {
+      name: "forge.command-palette",
+      version: 1,
+      partialize: (s) => ({ recents: s.recents, pinned: s.pinned }),
+    },
+  ),
+);
 
 /* ───────────── public API ───────────── */
 

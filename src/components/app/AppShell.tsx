@@ -13,6 +13,8 @@ import { Tutorial } from "@/components/onboarding/Tutorial";
 import { useGlobalCommands } from "@/hooks/useGlobalCommands";
 import { useGlobalDocSearch } from "@/hooks/useGlobalDocSearch";
 import { KeyboardShortcuts } from "@/components/app/KeyboardShortcuts";
+import { useCommandPalette } from "@/hooks/useCommandPalette";
+import { Search } from "lucide-react";
 
 /**
  * AppShell — floating dark sidebar on desktop, bottom bar on mobile.
@@ -35,6 +37,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useGlobalCommands({ onNewProject: () => setShowNewProject(true) });
   // Register every doc the user owns as a cross-project palette source.
   useGlobalDocSearch();
+  // Mobile has no ⌘K key, so expose an explicit palette trigger.
+  const { open: openPalette } = useCommandPalette();
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
@@ -59,6 +63,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <PresenceStrip peers={peers} />
         <NotificationBell />
       </div>
+      {/* Mobile-only command-palette trigger. Desktop relies on ⌘K;
+          touch devices have no such key, so surface an explicit button
+          where the desktop presence cluster would sit. */}
+      <button
+        type="button"
+        onClick={openPalette}
+        aria-label="Search and commands"
+        className="md:hidden fixed top-3 right-3 z-40 w-10 h-10 flex items-center justify-center bg-background/80 backdrop-blur-md border border-border text-muted hover:text-foreground active:scale-95 transition-all shadow-[0_8px_22px_-12px_rgba(0,0,0,0.5)]"
+      >
+        <Search size={16} strokeWidth={2} aria-hidden />
+      </button>
       {/* Remote screen cursors (Lattice / Sync / Calendar surfaces). */}
       <CursorOverlay peers={peers} />
       <MobileBottomNav onNewProject={() => setShowNewProject(true)} />
