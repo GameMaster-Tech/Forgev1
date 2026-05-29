@@ -56,9 +56,16 @@ export function useGlobalCommands(opts: UseGlobalCommandsOptions = {}) {
       make("research", "Chat", "/research", ["ask", "ai", "conversation"]),
       make("projects", "Projects", "/projects", ["workspace"]),
       make("calendar", "Calendar", "/calendar", ["schedule", "time"]),
+      make("preview", "Preview", "/preview", ["impact simulator", "what if"]),
+      make("sync", "Checks", "/sync", ["sync", "conflicts", "consistency"]),
+      make("pulse", "Freshness", "/pulse", ["pulse", "decay", "stale"]),
       make("activity", "Activity", "/activity", ["history", "log"]),
       make("teams", "Teams", "/teams", ["collaborators"]),
       make("settings", "Settings", "/settings", ["account", "preferences"]),
+      make("invariants", "Rules", "/calendar/compiler/invariants", [
+        "invariants",
+        "guardrails",
+      ]),
     ];
   }, [router]);
 
