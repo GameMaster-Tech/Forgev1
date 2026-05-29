@@ -276,14 +276,12 @@ function AICommandBar({
   open,
   onClose,
   onCommand,
-  onMorph,
   hasSelection,
   loading,
 }: {
   open: boolean;
   onClose: () => void;
   onCommand: (cmd: AICommand) => void;
-  onMorph: (instruction: string) => void;
   hasSelection: boolean;
   loading: boolean;
 }) {
@@ -293,7 +291,6 @@ function AICommandBar({
         <AICommandBarInner
           onClose={onClose}
           onCommand={onCommand}
-          onMorph={onMorph}
           hasSelection={hasSelection}
           loading={loading}
         />
@@ -302,39 +299,30 @@ function AICommandBar({
   );
 }
 
-/**
- * AICommandBarInner — the Morph surface. The text box is a free-form,
- * natural-language instruction ("turn this into a checklist", "tighten
- * this", "make it a table") that reshapes the selected content — or the
- * whole document when nothing is selected. The preset chips below remain
- * as one-tap shortcuts over the legacy /api/ai/write pipeline.
- */
 function AICommandBarInner({
   onClose,
   onCommand,
-  onMorph,
   hasSelection,
   loading,
 }: {
   onClose: () => void;
   onCommand: (cmd: AICommand) => void;
-  onMorph: (instruction: string) => void;
   hasSelection: boolean;
   loading: boolean;
 }) {
-  const [instruction, setInstruction] = useState("");
+  const [filter, setFilter] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const presets = aiCommands.filter((cmd) => hasSelection || !cmd.needsSelection);
-
-  const submit = () => {
-    const v = instruction.trim();
-    if (v) onMorph(v);
-  };
+  const filtered = aiCommands.filter((cmd) => {
+    if (filter && !cmd.label.toLowerCase().includes(filter.toLowerCase()))
+      return false;
+    if (!hasSelection && cmd.needsSelection) return false;
+    return true;
+  });
 
   return (
     <>
@@ -346,63 +334,51 @@ function AICommandBarInner({
         transition={{ duration: 0.18, ease }}
         className="absolute right-0 top-full mt-2 w-80 bg-surface border border-border shadow-[0_12px_32px_-16px_rgba(0,0,0,0.25)] z-50 overflow-hidden"
       >
-        {/* Morph header */}
+        {/* Search header */}
         <div className="px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2 mb-2.5">
             <Sparkles size={11} className="text-violet" />
             <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-foreground">
-              Morph
+              AI command
             </span>
             <span className="h-px flex-1 bg-border" />
             <span
               className={`text-[9px] font-medium uppercase tracking-[0.12em] ${
-                hasSelection ? "text-green" : "text-violet"
+                hasSelection ? "text-green" : "text-muted"
               }`}
             >
-              {hasSelection ? "Selection" : "Whole doc"}
+              {hasSelection ? "Selection" : "No selection"}
             </span>
           </div>
           <div className="flex items-center gap-2 bg-background border border-border focus-within:border-violet/50 px-3 py-2 transition-colors">
             <input
               ref={inputRef}
               type="text"
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              placeholder={loading ? "Morphing…" : "Tell Forge what to do…"}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={loading ? "Generating..." : "Type a command"}
               disabled={loading}
               className="flex-1 text-[12px] bg-transparent focus:outline-none placeholder:text-muted text-foreground disabled:opacity-50"
               onKeyDown={(e) => {
                 if (e.key === "Escape") onClose();
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submit();
+                if (e.key === "Enter" && filtered.length > 0) {
+                  onCommand(filtered[0].id);
                 }
               }}
             />
-            {loading ? (
-              <Loader2 size={12} className="text-violet animate-spin shrink-0" />
-            ) : (
-              instruction.trim() && (
-                <button
-                  type="button"
-                  onClick={submit}
-                  aria-label="Run transform"
-                  className="text-[9px] font-mono text-violet border border-violet/30 px-1.5 py-0.5 hover:bg-violet/[0.08] transition-colors shrink-0"
-                >
-                  ↵
-                </button>
-              )
+            {loading && (
+              <Loader2
+                size={12}
+                className="text-violet animate-spin shrink-0"
+              />
             )}
           </div>
         </div>
 
-        {/* Quick actions */}
+        {/* Commands */}
         {!loading && (
-          <div className="py-1 max-h-[280px] overflow-y-auto">
-            <div className="px-4 pt-1.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-muted/70">
-              Quick actions
-            </div>
-            {presets.map((cmd) => {
+          <div className="py-1 max-h-[300px] overflow-y-auto">
+            {filtered.map((cmd) => {
               const Icon = cmd.icon;
               return (
                 <button
@@ -433,6 +409,15 @@ function AICommandBarInner({
                 </button>
               );
             })}
+            {filtered.length === 0 && (
+              <div className="px-4 py-6 text-center">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-muted">
+                  {hasSelection
+                    ? "No matching commands"
+                    : "Select text to use AI editing"}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -440,8 +425,8 @@ function AICommandBarInner({
         <div className="px-4 py-2 border-t border-border">
           <span className="text-[9px] uppercase tracking-[0.15em] text-muted font-mono">
             {hasSelection
-              ? "↵ transform selection · esc to close"
-              : "↵ transform whole doc · select text to scope"}
+              ? "↵ enter · esc to close"
+              : "tip · select text for more options"}
           </span>
         </div>
       </motion.div>
@@ -683,11 +668,6 @@ export default function ForgeEditor({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<AICommand | null>(null);
-  // Morph (free-form transform) bookkeeping: how to apply the result and
-  // the last instruction (for retry). "replace-doc" rewrites the whole
-  // document; "insert" replaces the current selection / inserts at caret.
-  const morphApplyRef = useRef<"insert" | "replace-doc">("insert");
-  const lastMorphRef = useRef<string | null>(null);
   const [selectedText, setSelectedText] = useState("");
   // Viewport coords for the floating selection bubble (null = hidden).
   const [selBubble, setSelBubble] = useState<{ left: number; top: number } | null>(null);
@@ -1036,9 +1016,6 @@ export default function ForgeEditor({
       if (!editor) return;
       setAiLoading(true);
       setLastCommand(command);
-      // Preset commands insert/replace selection — never rewrite the doc.
-      morphApplyRef.current = "insert";
-      lastMorphRef.current = null;
 
       const text = selectedText || editor.state.doc.textContent.slice(-500);
       const context = editor.state.doc.textContent.slice(0, 1000);
@@ -1064,74 +1041,25 @@ export default function ForgeEditor({
     [editor, selectedText]
   );
 
-  /**
-   * Morph — apply a free-form natural-language transform to the current
-   * selection (or the whole document when nothing is selected). Returns
-   * an HTML fragment that previews before it touches the document.
-   */
-  const handleMorph = useCallback(
-    async (instruction: string) => {
-      if (!editor || !instruction.trim()) return;
-      const sel = selectedText.trim();
-      const useDoc = sel.length === 0;
-      const text = useDoc ? editor.state.doc.textContent : sel;
-      if (!text.trim()) return;
-
-      morphApplyRef.current = useDoc ? "replace-doc" : "insert";
-      lastMorphRef.current = instruction;
-      setLastCommand(null);
-      setAiOpen(false);
-      setAiLoading(true);
-
-      // Whole-doc transforms get no extra context (the text IS the doc);
-      // selection transforms pass a doc head so tone/voice carries over.
-      const context = useDoc ? "" : editor.state.doc.textContent.slice(0, 1500);
-
-      try {
-        const res = await fetch("/api/ai/transform", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ instruction, text, context }),
-        });
-        const data = await res.json();
-        if (data.result) setAiResult(data.result);
-        else setAiResult(null);
-      } catch {
-        setAiResult(null);
-      } finally {
-        setAiLoading(false);
-      }
-    },
-    [editor, selectedText]
-  );
-
   const handleAcceptAI = useCallback(() => {
     if (!editor || !aiResult) return;
 
-    if (morphApplyRef.current === "replace-doc") {
-      // Whole-document Morph — replace content. Reversible via Ctrl/Cmd-Z.
-      editor.chain().focus().setContent(aiResult).run();
+    if (selectedText) {
+      editor.chain().focus().insertContent(aiResult).run();
     } else {
-      // Replaces the active selection, or inserts at the caret.
       editor.chain().focus().insertContent(aiResult).run();
     }
 
     setAiResult(null);
     setLastCommand(null);
-    morphApplyRef.current = "insert";
-    lastMorphRef.current = null;
-  }, [editor, aiResult]);
+  }, [editor, aiResult, selectedText]);
 
   const handleRetryAI = useCallback(() => {
-    if (lastMorphRef.current) {
-      const instruction = lastMorphRef.current;
-      setAiResult(null);
-      handleMorph(instruction);
-    } else if (lastCommand) {
+    if (lastCommand) {
       setAiResult(null);
       handleAICommand(lastCommand);
     }
-  }, [lastCommand, handleAICommand, handleMorph]);
+  }, [lastCommand, handleAICommand]);
 
   if (!editor) return null;
 
@@ -1349,7 +1277,6 @@ export default function ForgeEditor({
               open={aiOpen}
               onClose={() => setAiOpen(false)}
               onCommand={handleAICommand}
-              onMorph={handleMorph}
               hasSelection={hasSelection}
               loading={aiLoading}
             />

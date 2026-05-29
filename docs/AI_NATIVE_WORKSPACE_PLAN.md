@@ -1,93 +1,104 @@
-# Forge → AI-Native Workspace — Execution Plan (v2)
+# Forge → AI-Native Workspace — Execution Plan (v3)
 
-> Status: **active** · CP1 in progress. Supersedes the research/claims framing.
+> Status: **active.** Morph removed. v3 is grounded in a competitive scan
+> (May 2026) of Notion AI, Mem, Tana, Reflect, Capacities, Taskade, and the
+> wave of "proactive agent" tools.
 
-## 0. North star
+## 0. What the research actually proves
 
-Forge is an **AI-native workspace** for any knowledge work — notes, plans,
-specs, journals, thinking. Its edge is **not** "more AI features." It is that AI
-makes the workspace **fast, comfortable, and high-quality** to think and create
-in. Judge every change against three values:
+The AI-workspace category has **converged**. Every serious tool is racing down
+the same four lanes:
 
-- **Speed** — instant, no spinners where avoidable, streamed, cached, optimistic.
-- **Comfort** — zero-friction, reversible, ambient. The user never has to set up
-  structure or babysit the AI.
-- **Quality** — the AI's output is good enough to keep, in your voice.
+1. **Agents that do tasks for you** (Notion's agent hub; autonomous multi-step).
+2. **Auto-organization** ("don't file anything; AI sorts it" — Mem, Tana).
+3. **Q&A / search over your content** (everyone).
+4. **Multi-format generation** (one outline → doc/slides/tasks — Skywork, Beautiful.ai).
+   …and now **proactive/anticipatory agents** that prep work before you ask.
 
-**What this is NOT:** not a research tool; not "embed everything into huge
-vectors"; not bolted-on chat. Embeddings are used *surgically* (recall, dedup,
-grouping) — never as the whole product. The unit we care about is the *content
-and the user's intent*, content-agnostic (a meeting note = a spec = a poem).
+**Conclusion:** chasing a *never-before-seen feature* is a trap. Everything I
+proposed earlier maps onto a lane above — that's *why* Grounding, Weave, Atlas,
+and **Morph** all read as derivative. Morph = "delegate a task to the AI," which
+is lane 1. Removed.
 
-**Dropped as derivative** (already exist elsewhere — not novel): Weave / Atlas /
-related-notes / knowledge-maps / per-claim Grounding. Retired.
+**Honest reassessment of the other planned pillars:**
+- **Command-as-Action** (NL command bar that *does* things) = lane 1 (the agent
+  race). Crowded. Dropped as a flagship.
+- **Continuity** (style/persistent memory) = Mem's whole pitch. Not unique on
+  its own. Demoted to an enhancer.
 
-## 1. The novel pillars
+## 1. The lane no one owns
 
-The novelty is the **interaction model**, not any single widget.
+Every competitor frames AI as a **producer/doer** that takes work *off* you, and
+is sprinting toward *more autonomy*. The unoccupied, contrarian position:
 
-1. **Morph — the malleable document.** Any content (a selection or a whole
-   page) can be reshaped by plain language, *in place* and *reversibly*: "turn
-   this into a checklist," "make it a table," "tighten this," "rewrite as an
-   email to my manager," "extract the decisions." Not a fixed menu of AI buttons
-   — an open instruction box that works on any content. Instant preview, one-tap
-   apply, one-tap revert. **This is CP1.**
+> **Forge keeps you in flow. AI amplifies the human in the act of thinking and
+> writing — instantly, reversibly — and never takes over.**
 
-2. **Command-as-Action.** The ⌘K palette stops being just navigation and becomes
-   an *action engine*: natural-language operations that execute across the
-   workspace ("summarize my last meeting note," "make these three notes a
-   project," "draft a reply"). Speed: do it from anywhere, no clicking around.
+This is the *opposite* of the agent race, and it is exactly where **speed,
+comfort, quality** live:
 
-3. **Continuity.** Forge quietly learns your voice/format/context and applies it
-   everywhere (so Morph and Command output land in *your* style), plus instant
-   recall of what you already wrote. Comfort + quality, ambient.
+- **Speed** — no chat round-trips, no "go ask the AI." Help appears *in* the
+  work, at the keystroke, sub-second.
+- **Comfort** — you never leave the keyboard, never lose control, everything is
+  reversible/ignorable. The AI is ambient, not a thing you operate.
+- **Quality** — output is in *your* voice and *your* context, so it's keepable.
 
-## 2. Backend pivot (threads through every CP)
+**Intellectual honesty:** no single mechanic below is unprecedented in isolation
+(in-line suggestions, recall, etc. all exist somewhere). The moat is the
+**consistent stance executed better than anyone**: every AI touch in Forge is
+in-flow, instant, reversible, and human-led — never a chat box, never a delegate,
+never a wait. That consistency is the product.
 
-Today the AI/data backend is research-shaped: `/api/ai/write` is a **closed enum**
-of 8 writing commands; `/api/ai/check-claims`, `/api/pulse/*`, contradiction and
-DOI routes assume claims/citations. The pivot:
+## 2. Signature build — "Flow"
 
-- **Generalize the AI action layer.** New `/api/ai/transform` — a content-agnostic
-  endpoint that takes a *free-form instruction* + content (+ light context) and
-  returns the transformed content. Reframe system prompts away from
-  "researchers/Sync/Pulse" to general knowledge work. `/api/ai/write` becomes a
-  thin preset wrapper over it (kept for back-compat, then migrated).
-- **Speed layer.** Default to a fast Groq model for interactive transforms;
-  stream where the UI benefits; cache by (instruction+content) hash.
-- **Surgical semantics.** Keep the existing embed endpoint for *recall and
-  grouping only*, computed on demand for the active context — not a
-  store-everything pipeline.
-- **De-emphasize, don't delete.** Pulse/Sync/forge-graph/claims remain reachable
-  as optional power-tools; removed from the default new-user path and nav.
+A small set of in-flow amplifiers that share one rule: *zero prompts, instant,
+reversible, in your voice.*
 
-## 3. Checkpoints (each ends green: typecheck + lint + `next build`; I report)
+- **F1 — In-flow continuation.** As you pause, Forge offers the next phrase / the
+  next bullet as dim **ghost text**; **Tab** accepts, anything else dismisses.
+  Grounded in the current document (and your recent voice), not a generic model.
+  No menu, no chat, no spinner.
+- **F2 — In-flow polish.** Select a few words → an instant, inline single-tap
+  tighten/clarify that *shows the change* and is one keystroke to accept/undo
+  (reversible diff, not a destructive replace).
+- **F3 — In-flow recall (later).** When a sentence you're typing closely matches
+  something you already wrote, a one-line, dismissible cue lets you pull it in —
+  surfaced *inline while typing*, never a panel.
 
-- **CP1 — Morph (malleable document).** `POST /api/ai/transform` (general,
-  free-form instruction, content-agnostic, fast model, bounded + rate-limited) +
-  an inline **Morph** surface in the editor: an instruction box that transforms
-  the current selection (or document) with instant preview, Apply, and Revert.
-  Reframe the AI system prompt to general workspace. *Verify:* "turn this into a
-  table" on a plain paragraph works; applies and reverts cleanly.
-- **CP2 — Command-as-Action.** ⌘K runs NL operations on the active doc/workspace,
-  routed through the transform/action layer; results land inline or as toasts.
-- **CP3 — Continuity + speed pass.** Lightweight style/context memory applied to
-  Morph & Command output; streaming + caching for instant feel.
-- **CP4 — Workspace re-frame.** Generalize surfaces beyond research (notes/tasks
-  unify on the same content model); de-emphasize claim machinery in nav +
-  onboarding.
+Differentiation vs. autocomplete/Notion: **zero-prompt + your-context grounding +
+reversible + thought/structure-level (not just word-level) + the no-chat stance.**
 
-## 4. Risks & decisions
+## 3. Backend posture
 
-- **Model latency vs quality.** Interactive Morph needs a fast model; long
-  transforms can use a deeper one. Start fast (Llama 3.3 70B / 8B-instant),
-  expose a "deeper" option later.
-- **Reversibility.** Morph applies as a normal editor edit, so Ctrl/Cmd-Z works;
-  we also keep the pre-Morph text for an explicit one-tap revert.
-- **Don't regress existing AI bar.** `/api/ai/write` stays until CP2 migrates it.
-- **Scope discipline.** No store-everything vectors; no new heavy infra in CP1.
+- **Speed first.** A dedicated, low-latency completion path on `FAST_MODEL`,
+  streamed, short-output, aggressively debounced + cached. Interactive AI must
+  feel instant — that is the feature.
+- **Reuse, don't sprawl.** Build on the existing Groq layer and auth/rate-limit
+  helpers. Surgical embeddings only where recall (F3) needs them.
+- **De-emphasize** research/claims surfaces from the default path (unchanged from
+  v2): keep as optional tools, not the identity.
 
-## 5. Out of scope (now)
+## 4. Checkpoints (each ends green: typecheck + lint + `next build`; I report)
 
-ANN/vector index, multi-modal embeddings, the trained "Veritas-R1/Forge-SAI"
-model (does not exist), claim extraction in the core path.
+- **CP-A — F1 in-flow continuation.** Fast streamed completion endpoint + a
+  ProseMirror ghost-text layer (Tab accept / Esc dismiss), debounced, off by
+  default with a one-tap toggle. *Verify:* pause → ghost appears <1s, Tab keeps
+  it, typing dismisses it, fully reversible.
+- **CP-B — F2 in-flow polish** (reversible inline diff on a selection).
+- **CP-C — speed/quality pass** (caching, voice grounding) + **F3 recall**.
+- **CP-D — de-emphasize research framing in nav/onboarding.**
+
+## 5. Risks & decisions
+
+- **"This is just autocomplete."** Mitigated by grounding + reversibility + the
+  consistent no-chat stance; F2/F3 move it past word-level completion. If the
+  bar is "unprecedented mechanic," that likely doesn't exist in this category —
+  see §0.
+- **Latency.** Sub-second is the whole point; if `FAST_MODEL` can't hit it
+  reliably, the feature fails its own test — we measure before shipping CP-A.
+- **Distraction.** Ghosting must be calm and opt-in; never auto-insert.
+
+## 6. Out of scope (now)
+
+Autonomous agents, store-everything vectors, multi-modal, the unbuilt
+"Veritas-R1/Forge-SAI" model, claim extraction in the core path.
