@@ -375,23 +375,28 @@ export async function getMessages(
   conversationId: string,
   opts: { max?: number; afterId?: string; userId?: string } = {},
 ) {
-  // Default ascending — chronological order is what UIs render.
-  // When caller passes `userId`, filter by it so the Firestore
-  // security rule that allows `resource.data.userId == auth.uid` can
-  // accept the list query without falling back to a parent traversal.
-  const constraints = [
-    ...(opts.userId ? [where("userId", "==", opts.userId)] : []),
-    orderBy("createdAt", "asc"),
-    ...(opts.max ? [fbLimit(opts.max)] : []),
-  ];
+  // We filter by `userId` (the security rule allows `resource.data.userId ==
+  // auth.uid` so the list query is accepted without a parent traversal) but
+  // we DON'T `orderBy("createdAt")` in Firestore — combining the two would
+  // require a composite (userId, createdAt) index that, if undeployed, makes
+  // opening a conversation fail outright. Messages per conversation are
+  // bounded, so we sort (and cap) on the client. Equality-only on userId
+  // relies solely on Firestore's automatic single-field index.
+  const constraints = opts.userId ? [where("userId", "==", opts.userId)] : [];
   const q = query(
     collection(db, "conversations", conversationId, "messages"),
     ...constraints,
   );
   const snap = await getDocs(q);
-  return snap.docs.map(
+  const rows = snap.docs.map(
     (d) => ({ id: d.id, ...d.data() } as FirestoreMessage),
   );
+  const toMs = (m: FirestoreMessage): number => {
+    const ts = m.createdAt as { toMillis?: () => number } | undefined;
+    return typeof ts?.toMillis === "function" ? ts.toMillis() : 0;
+  };
+  rows.sort((a, b) => toMs(a) - toMs(b));
+  return typeof opts.max === "number" ? rows.slice(0, opts.max) : rows;
 }
 
 /**

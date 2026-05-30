@@ -22,6 +22,16 @@
     },
 
     {
+      "_comment": "Messages — chronological read of a conversation's messages filtered by owner (userId + createdAt). The client also sorts defensively so an undeployed index never blocks opening a chat.",
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+
+    {
       "_comment": "Documents — list per project.",
       "collectionGroup": "documents",
       "queryScope": "COLLECTION",
