@@ -14,6 +14,7 @@ import { useGlobalCommands } from "@/hooks/useGlobalCommands";
 import { useGlobalDocSearch } from "@/hooks/useGlobalDocSearch";
 import { KeyboardShortcuts } from "@/components/app/KeyboardShortcuts";
 import { useCommandPalette } from "@/hooks/useCommandPalette";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Search } from "lucide-react";
 
 /**
@@ -54,7 +55,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar onNewProject={() => setShowNewProject(true)} />
       </div>
       <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-auto pb-16 md:pb-0 focus:outline-none">
-        {children}
+        {/* In-place net for client-render crashes: keeps the sidebar usable
+            and offers a retry, complementing the route-level error.tsx that
+            handles server-render failures. */}
+        <ErrorBoundary label="This view">{children}</ErrorBoundary>
       </main>
       {/* Floating top-right cluster: presence strip + notification bell.
           Both desktop-only; mobile gets the bell only via in-app bell

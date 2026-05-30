@@ -16,9 +16,12 @@
  * so the gate is stable across devices — local-storage is only a
  * within-session hint to suppress flicker.
  *
- * Steps cover the surface area a first-time user needs to feel
- * productive in five minutes: Projects → Docs → Checks → Freshness →
- * Schedule → Rules → Preview → Chat → Cmd-K.
+ * The first-run arc is AI-native, not research-framed: it walks a new
+ * user through the core loop — create a project → write → ask the AI →
+ * watch your content keep itself current — before introducing the power
+ * tools (checks, schedule, rules, preview). The goal is that within a
+ * couple of minutes the user has felt the assistant do real work, not
+ * read a feature tour.
  */
 
 import {
@@ -43,7 +46,6 @@ import {
   Command,
   Check,
   Layers,
-  Compass,
 } from "lucide-react";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
@@ -66,93 +68,84 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    icon: Compass,
+    icon: Sparkles,
     accent: "violet",
     eyebrow: "Welcome",
-    title: "Forge in 90 seconds.",
-    body: "Forge is a research workspace built around one principle: the things you write should agree with each other. Let's walk through the parts you'll touch every day.",
+    title: "An AI that writes with you.",
+    body: "Forge is an AI-native workspace. You create a project, start writing, and an assistant that has read everything in it drafts, edits, and answers alongside you — then keeps your content current as things change.",
     bullets: [
-      "Write docs, keep numbers + claims consistent",
-      "Plan your week around your real energy",
-      "Ask an assistant that has read your whole project",
+      "Create a project, then just start writing",
+      "Ask the AI — it has read your whole project",
+      "Living sections keep themselves up to date",
     ],
   },
   {
     icon: FileText,
     accent: "violet",
-    eyebrow: "Step 1 · Projects",
-    title: "Everything lives in a project.",
-    body: "Docs, sources, schedules, and rules all sit under a project. Spin one up for whatever you're working on — a paper, a launch, a deal — and Forge keeps every signal scoped to it.",
-    ctaLabel: "Open projects",
+    eyebrow: "Step 1 · Create a project",
+    title: "Start with a project.",
+    body: "A project is one workspace for whatever you're making — a paper, a launch, a deal. Spin one up and everything you write and ask lives inside it, scoped and remembered.",
+    ctaLabel: "Create a project",
     ctaHref: "/projects",
   },
   {
     icon: Layers,
     accent: "violet",
-    eyebrow: "Step 2 · Documents",
-    title: "Write like Notion. Think like a compiler.",
-    body: "The editor handles long-form writing, tables, embeds, sub-pages, comments, and slash commands. Anything you write is also food for the checks below.",
+    eyebrow: "Step 2 · Write",
+    title: "Open a doc and write.",
+    body: "The editor feels like Notion — long-form text, tables, sub-pages, slash commands. Type a few lines about what you're working on. Everything you write becomes context the AI can use.",
   },
   {
-    icon: GitBranch,
-    accent: "rose",
-    eyebrow: "Step 3 · Checks",
-    title: "Catch contradicting claims.",
-    body: "Hit \"Check now\" on the Checks page. The model reads every doc in the project and surfaces statement pairs that disagree — with verbatim quotes and a link straight to the spot to fix.",
-    ctaLabel: "Open Checks",
-    ctaHref: "/sync",
+    icon: MessageSquare,
+    accent: "cyan",
+    eyebrow: "Step 3 · Ask the AI",
+    title: "Ask, and watch it work.",
+    body: "Open chat and ask Forge to draft a section, pull in sources, or answer a question about your project. It already has the full context of your docs — so it writes in your voice, not boilerplate, and can drop results straight into the page.",
+    ctaLabel: "Open chat",
+    ctaHref: "/research",
   },
   {
     icon: Clock,
     accent: "cyan",
-    eyebrow: "Step 4 · Freshness",
-    title: "Flag claims that aged out.",
-    body: "Freshness scans your project for time-sensitive statements — dated milestones, current pricing, headcount, version pins — so the things most likely to drift never go unnoticed.",
-    ctaLabel: "Open Freshness",
+    eyebrow: "Step 4 · Stays current",
+    title: "Your content keeps itself fresh.",
+    body: "Living sections and freshness scans watch the time-sensitive parts of your work — numbers, dates, pricing, status — and flag or update them as reality moves, so what you wrote last week doesn't quietly go stale.",
+    ctaLabel: "See freshness",
     ctaHref: "/pulse",
+  },
+  {
+    icon: GitBranch,
+    accent: "rose",
+    eyebrow: "Power tool · Checks",
+    title: "Catch claims that disagree.",
+    body: "As your project grows, Checks reads every doc and surfaces statement pairs that contradict each other — with verbatim quotes and a link straight to the spot to fix.",
+    ctaLabel: "Open Checks",
+    ctaHref: "/sync",
   },
   {
     icon: CalendarIcon,
     accent: "warm",
-    eyebrow: "Step 5 · Schedule",
+    eyebrow: "Power tool · Schedule",
     title: "Plan around your energy.",
-    body: "Connect Google Calendar, drop in tasks, habits, and goals. Tempo arranges your week around your focus windows — and Forge explains why each block landed where it did.",
+    body: "Connect Google Calendar and drop in tasks, habits, and goals. Tempo arranges your week around your focus windows — and explains why each block landed where it did.",
     ctaLabel: "Open Calendar",
     ctaHref: "/calendar",
   },
   {
     icon: ShieldCheck,
     accent: "green",
-    eyebrow: "Step 6 · Rules",
-    title: "Set guardrails the system enforces.",
-    body: "Add rules like \"4 hours of deep work each day\" or \"never schedule meetings on Fridays.\" Tempo respects them; any change that would break a rule is blocked at the source.",
+    eyebrow: "Power tool · Rules",
+    title: "Set guardrails it enforces.",
+    body: "Add rules like \"4 hours of deep work each day\" or \"never schedule meetings on Fridays.\" Any change that would break a rule is blocked at the source.",
     ctaLabel: "Build rules",
     ctaHref: "/calendar/compiler/invariants",
-  },
-  {
-    icon: Sparkles,
-    accent: "violet",
-    eyebrow: "Step 7 · Preview",
-    title: "See the impact before you commit.",
-    body: "Stage a change — a new headcount, a different deadline — and Preview shows you everything downstream that moves, breaks, or stays put. No surprises after you save.",
-    ctaLabel: "Open Preview",
-    ctaHref: "/preview",
-  },
-  {
-    icon: MessageSquare,
-    accent: "cyan",
-    eyebrow: "Step 8 · Chat",
-    title: "Ask the assistant.",
-    body: "Open Research and ask anything about your project. The chat has the full context of your docs, your schedule, and your rules — it answers in your tone, not boilerplate.",
-    ctaLabel: "Open Chat",
-    ctaHref: "/research",
   },
   {
     icon: Command,
     accent: "violet",
     eyebrow: "Pro tip",
     title: "Cmd-K opens everything.",
-    body: "Anywhere in Forge, hit ⌘K to jump to a doc, switch projects, or fire a command. The fastest way to live in the app once it's familiar.",
+    body: "Anywhere in Forge, hit ⌘K to jump to a doc, switch projects, or ask the AI. The fastest way to live in the app once it's familiar.",
   },
 ];
 

@@ -41,6 +41,7 @@ import {
   type FirestoreDocument,
 } from "@/lib/firebase/firestore";
 import { CrystallizeModal } from "@/components/crystallize/CrystallizeModal";
+import { toastError } from "@/lib/toast";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -145,6 +146,7 @@ export default function ProjectPage({
       router.push(`/project/${projectId}/doc/${docId}`);
     } catch (err) {
       console.error("Failed to create document:", err);
+      toastError(err, "Couldn't create the document.");
     } finally {
       setCreating(false);
     }
@@ -431,6 +433,9 @@ export default function ProjectPage({
                         parentId,
                       );
                       router.push(`/project/${projectId}/doc/${newId}`);
+                    } catch (err) {
+                      console.error("Failed to create sub-page:", err);
+                      toastError(err, "Couldn't create the sub-page.");
                     } finally {
                       setCreating(false);
                     }

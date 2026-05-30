@@ -6,6 +6,7 @@ import {
   deleteProject as fbDeleteProject,
   type FirestoreProject,
 } from "@/lib/firebase/firestore";
+import { toastSuccess, toastError } from "@/lib/toast";
 
 export type ResearchMode = "lightning" | "reasoning" | "deep";
 
@@ -75,42 +76,77 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
   },
 
   addProject: async (userId, data) => {
-    const id = await fbCreateProject(userId, data);
-    // Optimistically add to local state
+    // Optimistic: drop a temp row in immediately, reconcile its id once the
+    // write lands, and roll it back out if the write fails.
     const now = Date.now();
-    set((state) => ({
-      projects: [
-        {
-          id,
-          name: data.name,
-          mode: data.mode,
-          systemInstructions: data.systemInstructions,
-          createdAt: now,
-          updatedAt: now,
-          queryCount: 0,
-          docCount: 0,
-          status: "active",
-        },
-        ...state.projects,
-      ],
-    }));
-    return id;
+    const tempId = `temp-${now}-${Math.random().toString(36).slice(2, 7)}`;
+    const optimistic: Project = {
+      id: tempId,
+      name: data.name,
+      mode: data.mode,
+      systemInstructions: data.systemInstructions,
+      createdAt: now,
+      updatedAt: now,
+      queryCount: 0,
+      docCount: 0,
+      status: "active",
+    };
+    set((state) => ({ projects: [optimistic, ...state.projects] }));
+    try {
+      const id = await fbCreateProject(userId, data);
+      set((state) => ({
+        projects: state.projects.map((p) =>
+          p.id === tempId ? { ...p, id } : p,
+        ),
+      }));
+      return id;
+    } catch (err) {
+      // Reconcile: remove the temp row so the list reflects reality. The
+      // caller (e.g. NewProjectModal) surfaces the failure inline; we
+      // rethrow so its control flow stays intact.
+      set((state) => ({
+        projects: state.projects.filter((p) => p.id !== tempId),
+      }));
+      throw err;
+    }
   },
 
   updateProject: async (id, updates) => {
-    await fbUpdateProject(id, updates);
+    // Optimistic: apply locally first, keep a snapshot to roll back to.
+    const prev = get().projects.find((p) => p.id === id);
     set((state) => ({
       projects: state.projects.map((p) =>
-        p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p
+        p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p,
       ),
     }));
+    try {
+      await fbUpdateProject(id, updates);
+      if (updates.name) toastSuccess("Project renamed", updates.name);
+      else if (updates.status === "archived") toastSuccess("Project archived");
+    } catch (err) {
+      if (prev) {
+        set((state) => ({
+          projects: state.projects.map((p) => (p.id === id ? prev : p)),
+        }));
+      }
+      toastError(err, "Couldn't save your changes.");
+      throw err;
+    }
   },
 
   deleteProject: async (id) => {
-    await fbDeleteProject(id);
-    set((state) => ({
-      projects: state.projects.filter((p) => p.id !== id),
-    }));
+    // Optimistic: pull the row immediately, restore it if the delete fails.
+    const prev = get().projects;
+    const removed = prev.find((p) => p.id === id);
+    set({ projects: prev.filter((p) => p.id !== id) });
+    try {
+      await fbDeleteProject(id);
+      toastSuccess("Project deleted", removed?.name);
+    } catch (err) {
+      set({ projects: prev });
+      toastError(err, "Couldn't delete the project.");
+      throw err;
+    }
   },
 
   getProject: (id) => get().projects.find((p) => p.id === id),

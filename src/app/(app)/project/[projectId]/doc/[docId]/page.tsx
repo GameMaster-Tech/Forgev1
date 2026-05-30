@@ -33,6 +33,7 @@ import { DocumentOutline } from "@/components/editor/DocumentOutline";
 import { RelatedDocsPanel } from "@/components/editor/RelatedDocsPanel";
 import { useDocComments } from "@/hooks/useDocComments";
 import { useCollaborativeDoc } from "@/hooks/useCollaborativeDoc";
+import { toastError } from "@/lib/toast";
 import type { Editor } from "@tiptap/react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
@@ -59,7 +60,11 @@ export default function EditorPage({
   const [citationCount, setCitationCount] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [saved, setSaved] = useState(true);
+  // `saveError` drives a persistent "Save failed — retry" affordance so the
+  // save indicator never gets stuck on "Saving…" when a write fails.
+  const [saveError, setSaveError] = useState(false);
   const [editorHtml, setEditorHtml] = useState("");
+  const [docError, setDocError] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestContentRef = useRef("");
   const editorHandleRef = useRef<EditorHandle | null>(null);
@@ -150,17 +155,27 @@ export default function EditorPage({
     let cancelled = false;
     async function load() {
       setDocLoading(true);
+      setDocError(false);
       try {
         const doc = await getDocument(docId);
-        if (!cancelled && doc) {
+        if (cancelled) return;
+        if (doc) {
           setDocData(doc);
           setTitle(doc.title);
           setEditorHtml(doc.content || "");
           setWordCount(doc.wordCount);
           setCitationCount(doc.citationCount);
+        } else {
+          // Doc genuinely doesn't exist (deleted / bad link) — show an
+          // explicit empty/error surface instead of a blank editor.
+          setDocError(true);
         }
       } catch (err) {
         console.error("Failed to load document:", err);
+        if (!cancelled) {
+          setDocError(true);
+          toastError(err, "Couldn't load this document.");
+        }
       } finally {
         if (!cancelled) setDocLoading(false);
       }
@@ -176,12 +191,24 @@ export default function EditorPage({
       try {
         await updateDocument(docId, { content, wordCount: words });
         setSaved(true);
+        setSaveError(false);
       } catch (err) {
+        // Surface the failure: clear the "Saving…" pulse, flip to a
+        // persistent "Save failed" state, and toast once so the writer
+        // knows their words aren't safe yet.
         console.error("Auto-save failed:", err);
+        setSaveError(true);
+        toastError(err, "Couldn't save your changes — we'll keep trying.");
       }
     },
     [docId]
   );
+
+  const retrySave = useCallback(() => {
+    setSaveError(false);
+    setSaved(false);
+    saveToFirestore(latestContentRef.current, wordCount);
+  }, [saveToFirestore, wordCount]);
 
   const handleEditorUpdate = useCallback(
     (html?: string) => {
@@ -199,9 +226,17 @@ export default function EditorPage({
     (newTitle: string) => {
       setTitle(newTitle);
       setSaved(false);
+      setSaveError(false);
       updateDocument(docId, { title: newTitle })
-        .then(() => setSaved(true))
-        .catch(() => {});
+        .then(() => {
+          setSaved(true);
+          setSaveError(false);
+        })
+        .catch((err) => {
+          console.error("Title save failed:", err);
+          setSaveError(true);
+          toastError(err, "Couldn't save the title.");
+        });
     },
     [docId]
   );
@@ -231,6 +266,32 @@ export default function EditorPage({
             Loading document
           </p>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (docError) {
+    return (
+      <div className="h-screen flex items-center justify-center px-6">
+        <div className="max-w-sm text-center">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-muted font-medium mb-3">
+            Document
+          </p>
+          <h2 className="font-display font-bold text-foreground text-2xl tracking-[-0.022em] leading-[1.1] mb-3">
+            We couldn&apos;t open this <span className="text-rose">document</span>.
+          </h2>
+          <p className="text-[13px] text-muted leading-relaxed mb-6">
+            It may have been deleted, moved, or the link is out of date. Your other
+            work is safe.
+          </p>
+          <Link
+            href={project ? `/project/${projectId}` : "/projects"}
+            className="inline-flex items-center gap-2 bg-violet text-white hover:bg-violet/90 text-[11px] font-semibold uppercase tracking-[0.12em] px-5 py-2.5 transition-colors duration-150"
+          >
+            <ArrowLeft size={12} strokeWidth={2} />
+            Back to {project?.name ?? "projects"}
+          </Link>
+        </div>
       </div>
     );
   }
@@ -274,17 +335,34 @@ export default function EditorPage({
           </span>
         </Link>
 
-        {/* Center: save dot — quietly informative */}
+        {/* Center: save dot — quietly informative, and loud when a save
+            actually fails so the writer is never told "Saving…" forever. */}
         <div className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className={`w-1.5 h-1.5 rounded-full transition-colors ${
-              saved ? "bg-green/70" : "bg-warm animate-pulse"
-            }`}
-          />
-          <span className="text-[10px] text-muted tabular-nums">
-            {saved ? "Saved" : "Saving…"}
-          </span>
+          {saveError ? (
+            <>
+              <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-rose" />
+              <span className="text-[10px] text-rose tabular-nums">Save failed</span>
+              <button
+                type="button"
+                onClick={retrySave}
+                className="text-[10px] text-rose underline underline-offset-2 hover:text-rose/80 transition-colors ml-0.5"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <>
+              <span
+                aria-hidden
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                  saved ? "bg-green/70" : "bg-warm animate-pulse"
+                }`}
+              />
+              <span className="text-[10px] text-muted tabular-nums">
+                {saved ? "Saved" : "Saving…"}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Right: icon-only affordances */}

@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useProjectsStore } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { toastSuccess, humanizeError } from "@/lib/toast";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -93,16 +94,17 @@ export default function NewProjectModal({ open, onClose }: NewProjectModalProps)
         }),
         new Promise<never>((_, reject) =>
           setTimeout(
-            () => reject(new Error("Request timed out. Ensure Firestore is enabled and security rules deployed.")),
+            () => reject(new Error("timed out")),
             15000
           )
         ),
       ]);
       handleClose();
+      toastSuccess("Project created", name.trim());
       router.push(`/project/${id}`);
     } catch (err) {
       console.error("Failed to create project:", err);
-      setError(err instanceof Error ? err.message : "Failed to create project.");
+      setError(humanizeError(err));
     } finally {
       setCreating(false);
     }
