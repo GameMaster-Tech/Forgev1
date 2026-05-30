@@ -29,6 +29,7 @@ import {
 import { useProjectsStore, type ResearchMode, type Project } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import NewProjectModal from "@/components/app/NewProjectModal";
+import { ProjectActionsMenu } from "@/components/app/ProjectActionsMenu";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -77,15 +78,23 @@ export default function ProjectsPage() {
   const { projects, loading, fetchProjects } = useProjectsStore();
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"active" | "archived" | "all">("active");
 
   useEffect(() => {
     if (user?.uid) fetchProjects(user.uid);
   }, [user?.uid, fetchProjects]);
 
+  const archivedCount = projects.filter((p) => p.status === "archived").length;
   const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
+  const byStatus =
+    statusFilter === "all"
+      ? sorted
+      : sorted.filter((p) =>
+          statusFilter === "archived" ? p.status === "archived" : p.status !== "archived",
+        );
   const filtered = filter
-    ? sorted.filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()))
-    : sorted;
+    ? byStatus.filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()))
+    : byStatus;
 
   const featured = filtered[0];
   const rest = filtered.slice(1);
@@ -118,14 +127,35 @@ export default function ProjectsPage() {
         </div>
 
         {sorted.length > 0 && (
-          <div className="flex items-center gap-3 max-w-md">
-            <Search size={14} className="text-muted shrink-0" strokeWidth={1.75} />
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter projects…"
-              className="flex-1 bg-transparent border-b border-border focus:border-violet outline-none text-[14px] py-1.5 placeholder:text-muted transition-colors"
-            />
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3 max-w-md flex-1 min-w-[200px]">
+              <Search size={14} className="text-muted shrink-0" strokeWidth={1.75} />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter projects…"
+                className="flex-1 bg-transparent border-b border-border focus:border-violet outline-none text-[14px] py-1.5 placeholder:text-muted transition-colors"
+              />
+            </div>
+            {archivedCount > 0 ? (
+              <div className="flex items-center border border-border divide-x divide-border shrink-0">
+                {(["active", "archived", "all"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStatusFilter(s)}
+                    className={`text-[10px] uppercase tracking-[0.12em] font-semibold px-3 py-1.5 transition-colors ${
+                      statusFilter === s
+                        ? "bg-violet text-white"
+                        : "text-muted hover:text-foreground hover:bg-foreground/[0.04]"
+                    }`}
+                  >
+                    {s}
+                    {s === "archived" ? ` · ${archivedCount}` : ""}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         )}
       </motion.header>
@@ -192,42 +222,49 @@ function FeaturedRow({ project }: { project: Project }) {
       <p className="text-[10px] uppercase tracking-[0.18em] text-muted font-medium mb-3">
         Most recent
       </p>
-      <Link
-        href={`/project/${project.id}`}
-        className="group block border border-border bg-surface p-5 forge-lift hover:border-violet/50 hover:bg-violet/[0.04] relative"
-      >
+      <div className="group relative border border-border bg-surface forge-lift hover:border-violet/50 hover:bg-violet/[0.04]">
         <span
           aria-hidden
           className="absolute left-0 top-5 bottom-5 w-[2px] bg-violet"
         />
-        <div className="flex items-center gap-2.5 mb-2">
-          <span className={`flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] font-semibold ${Mode.accent}`}>
-            <ModeIcon size={11} strokeWidth={2} />
-            {Mode.label}
-          </span>
-          <span className="w-1 h-1 bg-muted rounded-full" />
-          <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums">
-            {timeAgo(project.updatedAt)} ago
-          </span>
+        <div className="absolute top-4 right-4 z-10">
+          <ProjectActionsMenu project={project} />
         </div>
-        <h2 className="font-display font-bold text-foreground text-2xl sm:text-3xl tracking-[-0.022em] leading-[1.1] group-hover:text-violet transition-colors duration-150">
-          {project.name}
-        </h2>
-        <div className="mt-4 flex items-center gap-5 text-[11px] uppercase tracking-[0.12em] text-muted tabular-nums font-medium">
-          <span className="flex items-center gap-1.5">
-            <FileText size={11} strokeWidth={1.75} />
-            {project.docCount ?? 0} docs
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Search size={11} strokeWidth={1.75} />
-            {project.queryCount ?? 0} queries
-          </span>
-          <span className="ml-auto flex items-center gap-1.5 text-violet group-hover:gap-3 transition-all">
-            Open
-            <ArrowRight size={12} strokeWidth={2} />
-          </span>
-        </div>
-      </Link>
+        <Link href={`/project/${project.id}`} className="block p-5">
+          <div className="flex items-center gap-2.5 mb-2 pr-8">
+            <span className={`flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] font-semibold ${Mode.accent}`}>
+              <ModeIcon size={11} strokeWidth={2} />
+              {Mode.label}
+            </span>
+            {project.status === "archived" ? (
+              <span className="text-[9px] uppercase tracking-[0.12em] text-muted border border-border px-1.5 py-0.5">
+                Archived
+              </span>
+            ) : null}
+            <span className="w-1 h-1 bg-muted rounded-full" />
+            <span className="text-[10px] uppercase tracking-[0.12em] text-muted font-medium tabular-nums">
+              {timeAgo(project.updatedAt)} ago
+            </span>
+          </div>
+          <h2 className="font-display font-bold text-foreground text-2xl sm:text-3xl tracking-[-0.022em] leading-[1.1] group-hover:text-violet transition-colors duration-150">
+            {project.name}
+          </h2>
+          <div className="mt-4 flex items-center gap-5 text-[11px] uppercase tracking-[0.12em] text-muted tabular-nums font-medium">
+            <span className="flex items-center gap-1.5">
+              <FileText size={11} strokeWidth={1.75} />
+              {project.docCount ?? 0} docs
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Search size={11} strokeWidth={1.75} />
+              {project.queryCount ?? 0} queries
+            </span>
+            <span className="ml-auto flex items-center gap-1.5 text-violet group-hover:gap-3 transition-all">
+              Open
+              <ArrowRight size={12} strokeWidth={2} />
+            </span>
+          </div>
+        </Link>
+      </div>
     </motion.div>
   );
 }
@@ -241,32 +278,40 @@ function ProjectRow({ project, index }: { project: Project; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay: Math.max(0, index - 1) * 0.02, ease }}
     >
-      <Link
-        href={`/project/${project.id}`}
-        className="group grid grid-cols-12 items-center gap-x-4 sm:gap-x-6 py-4 hover:bg-violet/[0.06] transition-colors -mx-3 px-3 sm:-mx-4 sm:px-4"
-      >
-        <span className="col-span-1 font-display font-bold text-muted text-[13px] tabular-nums tracking-tight">
-          {String(index).padStart(2, "0")}
-        </span>
-        <div className="col-span-7 sm:col-span-6 min-w-0">
-          <h3 className="font-display font-bold text-foreground text-[16px] sm:text-[18px] tracking-[-0.018em] leading-tight truncate group-hover:text-violet transition-colors duration-150">
-            {project.name}
-          </h3>
-        </div>
-        <span
-          className={`hidden sm:flex items-center gap-1.5 col-span-2 text-[10px] uppercase tracking-[0.15em] font-semibold ${Mode.accent}`}
+      <div className="group relative flex items-center hover:bg-violet/[0.06] transition-colors -mx-3 px-3 sm:-mx-4 sm:px-4">
+        <Link
+          href={`/project/${project.id}`}
+          className="grid grid-cols-12 items-center gap-x-4 sm:gap-x-6 py-4 flex-1 min-w-0"
         >
-          <span className={`w-1.5 h-1.5 ${Mode.accentBg}`} />
-          {Mode.label}
-        </span>
-        <span className="col-span-3 sm:col-span-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.12em] text-muted tabular-nums font-medium justify-end">
-          <span className="hidden sm:inline">{project.docCount ?? 0} docs</span>
-          <span>{timeAgo(project.updatedAt)}</span>
-        </span>
-        <span className="col-span-1 flex justify-end">
-          <ArrowRight size={13} strokeWidth={1.75} className="text-muted group-hover:text-violet transition-colors" />
-        </span>
-      </Link>
+          <span className="col-span-1 font-display font-bold text-muted text-[13px] tabular-nums tracking-tight">
+            {String(index).padStart(2, "0")}
+          </span>
+          <div className="col-span-7 sm:col-span-6 min-w-0 flex items-center gap-2">
+            <h3 className="font-display font-bold text-foreground text-[16px] sm:text-[18px] tracking-[-0.018em] leading-tight truncate group-hover:text-violet transition-colors duration-150">
+              {project.name}
+            </h3>
+            {project.status === "archived" ? (
+              <span className="text-[9px] uppercase tracking-[0.12em] text-muted border border-border px-1.5 py-0.5 shrink-0">
+                Archived
+              </span>
+            ) : null}
+          </div>
+          <span
+            className={`hidden sm:flex items-center gap-1.5 col-span-2 text-[10px] uppercase tracking-[0.15em] font-semibold ${Mode.accent}`}
+          >
+            <span className={`w-1.5 h-1.5 ${Mode.accentBg}`} />
+            {Mode.label}
+          </span>
+          <span className="col-span-3 sm:col-span-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.12em] text-muted tabular-nums font-medium justify-end">
+            <span className="hidden sm:inline">{project.docCount ?? 0} docs</span>
+            <span>{timeAgo(project.updatedAt)}</span>
+          </span>
+          <span className="col-span-1" aria-hidden />
+        </Link>
+        <div className="shrink-0 pl-1">
+          <ProjectActionsMenu project={project} />
+        </div>
+      </div>
     </motion.li>
   );
 }

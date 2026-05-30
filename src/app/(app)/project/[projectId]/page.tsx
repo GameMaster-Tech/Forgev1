@@ -41,6 +41,8 @@ import {
   type FirestoreDocument,
 } from "@/lib/firebase/firestore";
 import { CrystallizeModal } from "@/components/crystallize/CrystallizeModal";
+import { ProjectActionsMenu } from "@/components/app/ProjectActionsMenu";
+import { DocActionsMenu } from "@/components/app/DocActionsMenu";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -134,6 +136,16 @@ export default function ProjectPage({
       cancelled = true;
     };
   }, [projectId, user?.uid]);
+
+  const reloadDocs = async () => {
+    if (!user?.uid) return;
+    try {
+      const result = await getProjectDocuments(projectId, user.uid);
+      setDocs(result);
+    } catch {
+      /* best effort — the row already updated optimistically */
+    }
+  };
 
   const handleCreateDoc = async () => {
     if (!newDocTitle.trim() || !user?.uid || creating) return;
@@ -325,6 +337,14 @@ export default function ProjectPage({
               <Plus size={12} strokeWidth={2.25} />
               New document
             </button>
+            <div className="border border-border">
+              <ProjectActionsMenu
+                project={project}
+                onChanged={() => {
+                  if (user?.uid) void getProjectDocuments(projectId, user.uid).then(setDocs).catch(() => {});
+                }}
+              />
+            </div>
           </div>
         </div>
       </motion.header>
@@ -420,6 +440,7 @@ export default function ProjectPage({
                   projectId={projectId}
                   depth={0}
                   order={i}
+                  onChanged={reloadDocs}
                   onAddSubPage={async (parentId, title) => {
                     if (!user?.uid) return;
                     setCreating(true);
@@ -480,6 +501,7 @@ function DocumentTreeRow({
   depth,
   order,
   onAddSubPage,
+  onChanged,
 }: {
   doc: FirestoreDocument;
   childrenOf: Map<string, FirestoreDocument[]>;
@@ -487,6 +509,7 @@ function DocumentTreeRow({
   depth: number;
   order: number;
   onAddSubPage: (parentId: string, title: string) => Promise<void>;
+  onChanged: () => void;
 }) {
   const verifyPct =
     doc.citationCount > 0
@@ -595,6 +618,7 @@ function DocumentTreeRow({
         >
           <Plus size={12} strokeWidth={2.25} />
         </button>
+        <DocActionsMenu docId={doc.id} projectId={projectId} onChanged={onChanged} />
         <ArrowRight
           size={13}
           className="text-muted group-hover:text-violet transition-colors shrink-0"
@@ -656,6 +680,7 @@ function DocumentTreeRow({
               depth={depth + 1}
               order={i}
               onAddSubPage={onAddSubPage}
+              onChanged={onChanged}
             />
           ))}
         </ul>
