@@ -128,8 +128,8 @@ export async function POST(request: Request): Promise<Response> {
           model: FAST_MODEL,
           system: SYSTEM_PROMPT,
           messages: [...history, { role: "user", content: userPrompt }],
-          maxTokens: 400,
-          temperature: 0.4,
+          maxTokens: 280,
+          temperature: 0.35,
           onDelta: (delta) => send({ delta }),
         });
         // Send the full text once more so a client that missed deltas still has it.

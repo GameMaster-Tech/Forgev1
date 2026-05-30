@@ -42,6 +42,7 @@ export function useAria() {
   const { user } = useAuth();
 
   const engineRef = useRef<StreamingSpeechEngine | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const pathnameRef = useRef(pathname);
   const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   pathnameRef.current = pathname;
@@ -82,6 +83,13 @@ export function useAria() {
         p.fail("Sign in to talk to Aria.");
         return;
       }
+      // Barge-in: a new command cancels any in-flight reply + Aria's speech.
+      abortRef.current?.abort();
+      if (typeof window !== "undefined" && window.speechSynthesis?.speaking) {
+        window.speechSynthesis.cancel();
+      }
+      const controller = new AbortController();
+      abortRef.current = controller;
       p.setSource("voice");
       p.setPhase("understanding");
       p.setIntent({
@@ -111,6 +119,7 @@ export function useAria() {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ transcript, context: ctx, history: historyRef.current }),
+          signal: controller.signal,
         });
         if (!res.ok || !res.body) {
           p.fail("Aria is unavailable right now.");
@@ -185,6 +194,8 @@ export function useAria() {
           window.setTimeout(() => usePresenceStore.getState().setPhase("idle"), 1400);
         }
       } catch (e) {
+        // A barge-in abort is intentional — stay quiet.
+        if (e instanceof DOMException && e.name === "AbortError") return;
         usePresenceStore.getState().fail(e instanceof Error ? e.message : "Aria hit a snag.");
       }
     },
