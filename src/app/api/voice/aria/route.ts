@@ -45,6 +45,7 @@ Action TYPEs and params (you can do ANYTHING a user can do in Forge):
   create_project      {"name":string}
   create_document     {"title":string,"projectId"?:string,"projectName"?:string,"content"?:string}
   create_team         {"name":string}
+  seed_workspace      {"name"?:string}    // new/empty user: makes a starter project + welcome doc. Use for "set up my workspace", "get me started", "I'm new here"
   create_event        {"title"?:string}
   create_task         {"title"?:string}
   create_goal         {"title"?:string}

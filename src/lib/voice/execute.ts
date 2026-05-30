@@ -35,6 +35,14 @@ export interface ExecDeps {
   currentDocId: string | null;
 }
 
+/** Welcome doc body Aria types in when seeding a starter workspace. */
+const WELCOME_BODY = [
+  "Welcome to Forge — your AI-voice-native workspace.",
+  "Aria just wrote this document by voice. Press F2 any time and tell her what to do: create projects and documents, navigate anywhere, edit text, or ask a question — she does it while you watch.",
+  "Everything you make lives inside a project. You're in your first one now. Try saying \"write a section about my goals here\", or \"open my calendar\".",
+  "When you're ready, rename this doc, keep writing, or ask Aria to start something new.",
+].join("\n\n");
+
 const SECTION_ROUTES: Record<string, string> = {
   projects: "/projects",
   research: "/research",
@@ -168,6 +176,16 @@ export async function executeDirective(
         deps.router.push(`/project/${pid}/doc/${docId}`);
       });
     }
+    case "seed_workspace":
+      return track("Setting up your workspace", "executing", async () => {
+        const name = action.name?.trim() || "My Workspace";
+        const pid = await createProject(deps.user.uid, { name, mode: "reasoning", systemInstructions: "" });
+        created.set(name.trim().toLowerCase(), pid);
+        const docId = await createDocument(deps.user.uid, pid, "Welcome to Forge");
+        // Aria types the welcome in on the doc page (visible + collab-safe).
+        queueDocWrite(docId, WELCOME_BODY, "append");
+        deps.router.push(`/project/${pid}/doc/${docId}`);
+      });
     case "create_team":
       return track(`Creating team "${action.name}"`, "executing", async () => {
         await createTeam(

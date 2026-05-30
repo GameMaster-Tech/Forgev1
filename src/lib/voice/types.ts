@@ -37,6 +37,7 @@ export type VoiceAction =
   | { type: "create_project"; name: string }
   | { type: "create_document"; title: string; projectId?: string; projectName?: string; content?: string }
   | { type: "create_team"; name: string }
+  | { type: "seed_workspace"; name?: string }
   | { type: "create_event"; title?: string }
   | { type: "create_task"; title?: string }
   | { type: "create_goal"; title?: string }
@@ -74,6 +75,7 @@ export const ALL_ACTION_TYPES: VoiceActionType[] = [
   "create_project",
   "create_document",
   "create_team",
+  "seed_workspace",
   "create_event",
   "create_task",
   "create_goal",
