@@ -26,6 +26,7 @@ import { choreographClick } from "./choreograph";
 import { queueDocWrite } from "./handoff";
 import { setIntendedRoute } from "./navState";
 import { getLastDoc } from "./lastVisited";
+import { createCalendarEvent, createTask, createGoal, createHabit } from "./create";
 import type { ConfirmationDecision } from "@/lib/presence/types";
 import type { VoiceAction } from "./types";
 
@@ -70,6 +71,20 @@ function toHtml(content: string): string {
     .map((p) => `<p>${escapeHtml(p.trim()).replace(/\n/g, "<br>")}</p>`)
     .filter((p) => p !== "<p></p>")
     .join("");
+}
+/** Mirror useActiveProject's resolution (URL → stored → first) so Aria writes
+ *  calendar/task/goal/habit records to the SAME project the calendar reads. */
+function resolveActiveProjectId(deps: ExecDeps): string | null {
+  if (deps.currentProjectId) return deps.currentProjectId;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("forge.activeProject.v1");
+      if (stored && deps.projects.some((pr) => pr.id === stored)) return stored;
+    } catch {
+      /* localStorage disabled */
+    }
+  }
+  return deps.projects[0]?.id ?? null;
 }
 function resolveProjectId(name: string | undefined, deps: ExecDeps, created: Map<string, string>): string | null {
   if (!name) return null;
@@ -209,15 +224,43 @@ export async function executeDirective(
         deps.router.push("/teams");
       });
     case "create_event":
+      return track(`Adding "${action.title ?? "event"}"`, "executing", async () => {
+        const pid = resolveActiveProjectId(deps);
+        if (!pid) return void p.fail("Create a project first, then I can add events.");
+        await createCalendarEvent(
+          { uid: deps.user.uid, projectId: pid },
+          { title: action.title, start: action.start, end: action.end, allDay: action.allDay, kind: action.kind },
+        );
+        setIntendedRoute("/calendar");
+        deps.router.push("/calendar");
+      });
     case "create_task":
-      navTo("/calendar?new=1", "new event", deps);
-      return;
+      return track(`Adding task "${action.title ?? ""}"`, "executing", async () => {
+        const pid = resolveActiveProjectId(deps);
+        if (!pid) return void p.fail("Create a project first, then I can add tasks.");
+        await createTask({ uid: deps.user.uid, projectId: pid }, { title: action.title, due: action.due });
+        setIntendedRoute("/calendar/tempo");
+        deps.router.push("/calendar/tempo");
+      });
     case "create_goal":
-      navTo("/calendar/goals?new=1", "new goal", deps);
-      return;
+      return track(`Adding goal "${action.title ?? ""}"`, "executing", async () => {
+        const pid = resolveActiveProjectId(deps);
+        if (!pid) return void p.fail("Create a project first, then I can add goals.");
+        await createGoal(
+          { uid: deps.user.uid, projectId: pid },
+          { title: action.title, targetDate: action.targetDate, successCriteria: action.successCriteria },
+        );
+        setIntendedRoute("/calendar/goals");
+        deps.router.push("/calendar/goals");
+      });
     case "create_habit":
-      navTo("/calendar/habits?new=1", "new habit", deps);
-      return;
+      return track(`Adding habit "${action.title ?? ""}"`, "executing", async () => {
+        const pid = resolveActiveProjectId(deps);
+        if (!pid) return void p.fail("Create a project first, then I can add habits.");
+        await createHabit({ uid: deps.user.uid, projectId: pid }, { title: action.title, rrule: action.rrule });
+        setIntendedRoute("/calendar/habits");
+        deps.router.push("/calendar/habits");
+      });
 
     /* ── edit ── */
     case "edit_document": {

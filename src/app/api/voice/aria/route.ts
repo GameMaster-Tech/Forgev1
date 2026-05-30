@@ -1,18 +1,15 @@
 /**
  * POST /api/voice/aria — Aria, Forge's conversational voice agent.
  *
- * Aria streams a single natural-language turn (Groq 8b-instant) that talks to
- * the user AND emits inline action directives the client executes optimistically
- * as they stream — no tool loop, no waiting on results. Directives use a compact
- * syntax the client parses out of the speech:
+ * Aria returns a single STRUCTURED JSON envelope:
  *
- *     <<do:open_project {"name":"AI"}>>
+ *     { "speech": "<what she says aloud>", "actions": [ { "type": ..., ... } ] }
  *
- * Aria is told to emit the PRIMARY action first, so the client can start it
- * within ~400ms while Aria keeps talking. Context (projects, recent docs,
- * selection) is injected so names resolve to ids in this one shot.
- *
- * Transport: Server-Sent Events. Each frame: { delta } | { done }.
+ * Speech and actions are separate fields, so an action can never leak into the
+ * spoken text (the old inline-`<<do:>>`-in-prose contract was unreliable on an
+ * 8B model — directives got spoken instead of executed). Groq JSON mode forces
+ * valid structure; the client executes `actions` deterministically and speaks
+ * `speech`. One round-trip, no tool loop.
  */
 
 import { isAuthFailure, requireUser } from "@/lib/server/api-auth";
@@ -23,55 +20,66 @@ import {
   RATE_LIMIT_EXPENSIVE,
 } from "@/lib/server/rate-limit";
 import { FAST_MODEL, groqChat } from "@/lib/ai/groq";
-import type { VoiceContext } from "@/lib/voice/types";
+import { ALL_ACTION_TYPES, type VoiceContext } from "@/lib/voice/types";
 
 const MAX_TRANSCRIPT = 600;
+const ACTION_SET = new Set<string>(ALL_ACTION_TYPES);
 
-const SYSTEM_PROMPT = `You are Aria, the voice of Forge — an AI-voice-native workspace. You are warm, concise, and capable. You both TALK to the user and DO things for them in the same breath.
+const SYSTEM_PROMPT = `You are Aria, the voice of Forge — an AI-voice-native workspace. You are warm, concise, and capable: you TALK to the user AND DO things for them.
 
-How you act: embed action directives inline in your reply using this exact syntax:
-  <<do:TYPE {"key":"value"}>>
-
-Emit the PRIMARY action directive FIRST (before you elaborate), so it can run immediately, then keep talking naturally.
-
-Action TYPEs and params (you can do ANYTHING a user can do in Forge):
-  navigate            {"section":"projects|research|calendar|tempo|goals|habits|integrations|invariants|teams|activity|settings|preview|home"}
-  go_back             {}
-  open_project        {"projectId"?:string,"name"?:string}
-  open_project_graph  {"projectId"?:string,"name"?:string}
-  open_project_planner{"projectId"?:string,"name"?:string}
-  open_document       {"docId"?:string,"projectId"?:string,"title"?:string}
-  open_last           {}                  // resume the last document the user worked on ("open the last thing I worked on", "resume", "continue where I left off")
-  open_team           {"teamId"?:string,"name"?:string}
-  create_project      {"name":string}
-  create_document     {"title":string,"projectId"?:string,"projectName"?:string,"content"?:string}
-  create_team         {"name":string}
-  seed_workspace      {"name"?:string}    // new/empty user: makes a starter project + welcome doc. Use for "set up my workspace", "get me started", "I'm new here"
-  create_event        {"title"?:string}
-  create_task         {"title"?:string}
-  create_goal         {"title"?:string}
-  create_habit        {"title"?:string}
-  edit_document       {"mode":"append|prepend|replace","content":string,"docId"?:string}   // omit docId to edit the doc the user is viewing
-  rename              {"kind":"document|project","id"?:string,"projectId"?:string,"name":string}
-  delete              {"kind":"document|project|team","id"?:string,"name"?:string,"projectId"?:string,"label"?:string}
-  search              {"query":string}
-  ask                 {"question":string}    // open Research with a question
-  tempo_plan          {"intent":string}
-  command_palette     {}                      // open ⌘K
-  set_theme           {"theme":"light|dark|system"}
-  toggle_doc_panel    {"panel":"research|comments|related|outline"}   // only when a document is open
+Respond with ONLY a single JSON object — no prose, no markdown, nothing around it:
+{"speech":"<one or two short sentences you say out loud>","actions":[ <zero or more action objects> ]}
 
 Rules:
-- You can SEE what the user sees: CONTEXT.visibleText is the text currently on their screen, CONTEXT.textSelection is what they've highlighted. Use them to answer "what's this", "summarize this", "read this", and to resolve "this".
-- Resolve names to ids from CONTEXT (projects + recentDocs). Prefer ids; include the name when unsure.
-- "this"/"current"/"selected" → use CONTEXT.currentDocId / currentProjectId / selection / textSelection.
-- To write content, put plain text in create_document.content.
-- Deletes are fine to emit — the app confirms with the user before doing them; never refuse, just emit the delete directive and say you'll confirm.
-- If the request is ambiguous, DON'T guess — ask a short clarifying question (no directive).
-- If it's just a question, answer conversationally (no directive).
-- Keep replies to 1-2 short sentences. Speak like a person, not a form. Never mention "directives" or show JSON to the user beyond the <<do:...>> tokens.`;
+- "speech" is natural spoken language. NEVER put action names, JSON, code, ids, or <<>> tokens in speech.
+- "actions" is the ORDERED list of things to do. Use [] for a pure answer or a clarifying question.
+- Resolve names → ids from CONTEXT (projects + recentDocs). Prefer ids; include "name"/"title" when unsure.
+- "this"/"current"/"selected" → CONTEXT.currentDocId / currentProjectId / selection / textSelection.
+- You can SEE the screen: CONTEXT.visibleText and CONTEXT.textSelection. Use them to answer "what's this", "summarize this", "read this".
+- Times: CONTEXT.now is the current ISO time and CONTEXT.timeZone the user's zone — compute ISO "start"/"end" from phrases like "tomorrow at 3pm".
+- Deletes are fine — the app confirms before doing them. Emit the delete and say you'll confirm.
+- If ambiguous, ask a short clarifying question in "speech" with "actions":[].
 
-function clampContext(ctx: VoiceContext): VoiceContext {
+Each action = {"type":<TYPE>, ...params}. TYPEs:
+  navigate {"section":"projects|research|calendar|tempo|goals|habits|integrations|invariants|teams|activity|settings|preview|home"}
+  go_back {}
+  open_project {"projectId"?,"name"?}
+  open_project_graph {"projectId"?,"name"?}
+  open_project_planner {"projectId"?,"name"?}
+  open_document {"docId"?,"projectId"?,"title"?}
+  open_last {}
+  open_team {"teamId"?,"name"?}
+  create_project {"name"}
+  create_document {"title","projectId"?,"projectName"?,"content"?}
+  create_team {"name"}
+  seed_workspace {"name"?}
+  create_event {"title","start"?(ISO),"end"?(ISO),"allDay"?,"kind"?:"meeting|deadline|focus|personal"}
+  create_task {"title","due"?(ISO)}
+  create_goal {"title","targetDate"?(ISO),"successCriteria"?}
+  create_habit {"title","rrule"?}
+  edit_document {"mode":"append|prepend|replace","content","docId"?}
+  rename {"kind":"document|project","id"?,"projectId"?,"name"}
+  delete {"kind":"document|project|team","id"?,"name"?,"projectId"?,"label"?}
+  search {"query"}
+  ask {"question"}
+  tempo_plan {"intent"}
+  command_palette {}
+  set_theme {"theme":"light|dark|system"}
+  toggle_doc_panel {"panel":"research|comments|related|outline"}
+
+Examples:
+  "open the AI project" -> {"speech":"Opening the AI project.","actions":[{"type":"open_project","name":"AI"}]}
+  "go to my calendar" -> {"speech":"Here's your calendar.","actions":[{"type":"navigate","section":"calendar"}]}
+  "add a meeting tomorrow at 3pm" -> {"speech":"Added it to your calendar.","actions":[{"type":"create_event","title":"Meeting","start":"<ISO>","end":"<ISO>","kind":"meeting"}]}
+  "make a goal to ship v2 by August" -> {"speech":"Goal created.","actions":[{"type":"create_goal","title":"Ship v2","targetDate":"<ISO>"}]}
+  "what's on screen?" -> {"speech":"<short summary of CONTEXT.visibleText>","actions":[]}`;
+
+interface ClampedContext extends VoiceContext {
+  now: string;
+  timeZone: string;
+}
+
+function clampContext(ctx: VoiceContext): ClampedContext {
   return {
     route: typeof ctx?.route === "string" ? ctx.route.slice(0, 120) : "/",
     currentProjectId: ctx?.currentProjectId ?? null,
@@ -81,7 +89,46 @@ function clampContext(ctx: VoiceContext): VoiceContext {
     selection: ctx?.selection ?? null,
     textSelection: typeof ctx?.textSelection === "string" ? ctx.textSelection.slice(0, 400) : null,
     visibleText: typeof ctx?.visibleText === "string" ? ctx.visibleText.slice(0, 3000) : null,
+    now: typeof ctx?.now === "string" ? ctx.now : new Date().toISOString(),
+    timeZone: typeof ctx?.timeZone === "string" ? ctx.timeZone.slice(0, 60) : "UTC",
   };
+}
+
+interface AriaEnvelope {
+  speech: string;
+  actions: Record<string, unknown>[];
+}
+
+/** Parse the model's JSON envelope, tolerating stray prose/fences, and keep
+ *  only actions whose `type` we recognize. */
+function parseEnvelope(content: string): AriaEnvelope {
+  const raw = content.trim();
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Salvage the first {...} block if the model wrapped it in prose/fences.
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        parsed = JSON.parse(m[0]);
+      } catch {
+        /* give up — speak the raw text */
+      }
+    }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { speech: raw.slice(0, 400), actions: [] };
+  }
+  const obj = parsed as { speech?: unknown; actions?: unknown };
+  const speech = typeof obj.speech === "string" ? obj.speech : "";
+  const actions = Array.isArray(obj.actions)
+    ? obj.actions.filter(
+        (a): a is Record<string, unknown> =>
+          !!a && typeof a === "object" && typeof (a as { type?: unknown }).type === "string" && ACTION_SET.has((a as { type: string }).type),
+      )
+    : [];
+  return { speech, actions };
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -115,42 +162,21 @@ export async function POST(request: Request): Promise<Response> {
 
   const userPrompt = `CONTEXT:\n${JSON.stringify(context)}\n\nUSER SAID:\n${transcript}`;
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (obj: unknown) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {
-          /* closed */
-        }
-      };
-      try {
-        const result = await groqChat({
-          model: FAST_MODEL,
-          system: SYSTEM_PROMPT,
-          messages: [...history, { role: "user", content: userPrompt }],
-          maxTokens: 280,
-          temperature: 0.35,
-          onDelta: (delta) => send({ delta }),
-        });
-        // Send the full text once more so a client that missed deltas still has it.
-        send({ done: true, full: result.content ?? "" });
-      } catch (err) {
-        send({ error: err instanceof Error ? err.message : "Aria hit a snag." });
-        send({ done: true, full: "" });
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  try {
+    const result = await groqChat({
+      model: FAST_MODEL,
+      system: SYSTEM_PROMPT,
+      messages: [...history, { role: "user", content: userPrompt }],
+      maxTokens: 500,
+      temperature: 0.2,
+      jsonResponse: true,
+    });
+    const envelope = parseEnvelope(result.content ?? "");
+    return Response.json(envelope, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    return Response.json(
+      { error: err instanceof Error ? err.message : "Aria hit a snag.", speech: "", actions: [] },
+      { status: 200 },
+    );
+  }
 }

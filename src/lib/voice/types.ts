@@ -39,10 +39,10 @@ export type VoiceAction =
   | { type: "create_document"; title: string; projectId?: string; projectName?: string; content?: string }
   | { type: "create_team"; name: string }
   | { type: "seed_workspace"; name?: string }
-  | { type: "create_event"; title?: string }
-  | { type: "create_task"; title?: string }
-  | { type: "create_goal"; title?: string }
-  | { type: "create_habit"; title?: string }
+  | { type: "create_event"; title?: string; start?: string; end?: string; allDay?: boolean; kind?: "meeting" | "deadline" | "focus" | "personal" }
+  | { type: "create_task"; title?: string; due?: string }
+  | { type: "create_goal"; title?: string; targetDate?: string; successCriteria?: string }
+  | { type: "create_habit"; title?: string; rrule?: string }
   /* ── edit ── */
   | { type: "edit_document"; mode: "append" | "prepend" | "replace"; content: string; docId?: string; projectId?: string }
   | { type: "rename"; kind: "document" | "project"; id?: string; projectId?: string; name: string }
@@ -112,6 +112,10 @@ export interface VoiceContext {
   /** What's currently on the user's screen (main content) — so Aria sees what
    *  you see and can resolve "this", "summarize this", "what's on screen". */
   visibleText: string | null;
+  /** Current ISO time + the user's IANA zone, so Aria can compute event times
+   *  from phrases like "tomorrow at 3pm". */
+  now?: string;
+  timeZone?: string;
 }
 
 export const EMPTY_COMPILE: CompileResult = {

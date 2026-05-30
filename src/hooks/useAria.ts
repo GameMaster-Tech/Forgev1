@@ -19,11 +19,10 @@ import { useDocsStore } from "@/store/docs";
 import { toConfidence, type PredictedIntent } from "@/lib/presence/types";
 import { StreamingSpeechEngine, ensureMicAccess } from "@/lib/presence/audio";
 import { spatialTracker, resolveTargetId } from "@/lib/presence/spatial";
-import { DirectiveParser } from "@/lib/voice/stream";
 import { executeDirective, type ExecDeps } from "@/lib/voice/execute";
 import { getIntendedRoute, clearIntendedRoute } from "@/lib/voice/navState";
 import { saveVoiceMessage } from "@/lib/firebase/voiceChats";
-import type { VoiceContext } from "@/lib/voice/types";
+import type { VoiceContext, VoiceAction } from "@/lib/voice/types";
 
 function speak(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -131,6 +130,14 @@ export function useAria() {
       selection: selId ? { id: selId, label: "", kind: "" } : null,
       textSelection: sc.textSelection,
       visibleText,
+      now: new Date().toISOString(),
+      timeZone: (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+        } catch {
+          return "UTC";
+        }
+      })(),
     };
   }, []);
 
@@ -170,9 +177,6 @@ export function useAria() {
         currentDocId: ctx.currentDocId,
       };
       const created = new Map<string, string>();
-      const parser = new DirectiveParser();
-      const actionTypes: string[] = [];
-      let speech = "";
 
       try {
         const token = await user.getIdToken();
@@ -182,56 +186,37 @@ export function useAria() {
           body: JSON.stringify({ transcript, context: ctx, history: historyRef.current }),
           signal: controller.signal,
         });
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
           const msg = "Aria is unavailable right now.";
           p.fail(msg);
           speak(msg);
           return;
         }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const frames = buf.split("\n\n");
-          buf = frames.pop() ?? "";
-          for (const frame of frames) {
-            const m = /^data: ([\s\S]*)$/.exec(frame.trim());
-            if (!m) continue;
-            let evt: { delta?: string; done?: boolean; error?: string };
-            try {
-              evt = JSON.parse(m[1]);
-            } catch {
-              continue;
-            }
-            if (evt.error) usePresenceStore.getState().fail(evt.error);
-            if (typeof evt.delta === "string") {
-              const { text, directives } = parser.push(evt.delta);
-              if (text) {
-                speech += text;
-                usePresenceStore.getState().setIntent({
-                  action: "unknown",
-                  label: speech.replace(/\s+/g, " ").trim() || "…",
-                  confidence: toConfidence(0.8),
-                  partial: true,
-                  transcript,
-                });
-              }
-              for (const d of directives) {
-                actionTypes.push(d.type);
-                void executeDirective(d, deps, created);
-              }
-            }
-            if (evt.done) {
-              const tail = parser.flush();
-              if (tail.text) speech += tail.text;
-            }
+        // Structured envelope: speech and actions are SEPARATE fields, so a
+        // command can never be spoken, and JSON mode guarantees valid structure.
+        const data = (await res.json()) as { speech?: string; actions?: VoiceAction[]; error?: string };
+        if (data.error) {
+          p.fail(data.error);
+          speak(data.error);
+          return;
+        }
+
+        const actions = Array.isArray(data.actions) ? data.actions : [];
+        const clean = (data.speech ?? "").replace(/\s+/g, " ").trim();
+
+        // Execute every action deterministically, in order, awaiting each so the
+        // UI commits (navigation/creation) before the turn settles.
+        const actionTypes: string[] = [];
+        for (const action of actions) {
+          if (!action || typeof action.type !== "string") continue;
+          actionTypes.push(action.type);
+          try {
+            await executeDirective(action, deps, created);
+          } catch (err) {
+            console.warn("[aria] action failed:", action.type, err);
           }
         }
 
-        const clean = speech.replace(/\s+/g, " ").trim();
         if (clean) {
           usePresenceStore.getState().setIntent({
             action: "unknown",
@@ -242,8 +227,7 @@ export function useAria() {
           });
           speak(clean);
         } else if (actionTypes.length === 0) {
-          // The model returned nothing usable AND took no action — never leave
-          // the user with silence. Acknowledge out loud so the loop feels alive.
+          // Nothing usable AND no action — never leave the user in silence.
           const m = "Sorry, I didn't catch that — try again?";
           usePresenceStore.getState().setIntent({
             action: "unknown",
@@ -254,6 +238,7 @@ export function useAria() {
           });
           speak(m);
         }
+
         historyRef.current = [
           ...historyRef.current,
           { role: "user" as const, content: transcript },
