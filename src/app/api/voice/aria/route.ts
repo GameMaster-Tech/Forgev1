@@ -60,8 +60,9 @@ Action TYPEs and params (you can do ANYTHING a user can do in Forge):
   toggle_doc_panel    {"panel":"research|comments|related|outline"}   // only when a document is open
 
 Rules:
+- You can SEE what the user sees: CONTEXT.visibleText is the text currently on their screen, CONTEXT.textSelection is what they've highlighted. Use them to answer "what's this", "summarize this", "read this", and to resolve "this".
 - Resolve names to ids from CONTEXT (projects + recentDocs). Prefer ids; include the name when unsure.
-- "this"/"current"/"selected" → use CONTEXT.currentDocId / currentProjectId / selection.
+- "this"/"current"/"selected" → use CONTEXT.currentDocId / currentProjectId / selection / textSelection.
 - To write content, put plain text in create_document.content.
 - Deletes are fine to emit — the app confirms with the user before doing them; never refuse, just emit the delete directive and say you'll confirm.
 - If the request is ambiguous, DON'T guess — ask a short clarifying question (no directive).
@@ -77,6 +78,7 @@ function clampContext(ctx: VoiceContext): VoiceContext {
     recentDocs: Array.isArray(ctx?.recentDocs) ? ctx.recentDocs.slice(0, 20) : [],
     selection: ctx?.selection ?? null,
     textSelection: typeof ctx?.textSelection === "string" ? ctx.textSelection.slice(0, 400) : null,
+    visibleText: typeof ctx?.visibleText === "string" ? ctx.visibleText.slice(0, 3000) : null,
   };
 }
 

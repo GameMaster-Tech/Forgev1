@@ -10,7 +10,7 @@
  * the single shot resolves names → ids without lookups.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
@@ -60,6 +60,9 @@ export function useAria() {
     const currentDocId = docMatch?.[2] ?? null;
     const sc = spatialTracker.capture();
     const selId = sc.selectedId ?? sc.hoveredId;
+    // What the user is actually looking at — the main content area.
+    const main = typeof document !== "undefined" ? document.getElementById("main-content") : null;
+    const visibleText = main?.innerText?.replace(/\s+/g, " ").trim().slice(0, 3000) ?? null;
     return {
       route,
       currentProjectId,
@@ -68,6 +71,7 @@ export function useAria() {
       recentDocs: [],
       selection: selId ? { id: selId, label: "", kind: "" } : null,
       textSelection: sc.textSelection,
+      visibleText,
     };
   }, []);
 
@@ -216,5 +220,85 @@ export function useAria() {
 
   const stopListening = useCallback(() => engineRef.current?.stop(), []);
 
-  return { listen, stopListening, run, supported: StreamingSpeechEngine.isSupported() };
+  /* ── continuous voice session: one press to start, press again to stop ── */
+  const sessionRef = useRef(false);
+  const [active, setActive] = useState(false);
+
+  const beginListen = useCallback(() => {
+    const engine = engineRef.current ?? new StreamingSpeechEngine();
+    engineRef.current = engine;
+    const st = usePresenceStore.getState();
+    st.setSource("voice");
+    if (st.phase === "idle") st.setPhase("listening");
+    engine.start({
+      onStart: () => {
+        const s = usePresenceStore.getState();
+        if (s.phase === "idle") s.setPhase("listening");
+      },
+      onPartial: (_i, t) =>
+        usePresenceStore
+          .getState()
+          .setIntent({ action: "unknown", label: t, confidence: toConfidence(0.4), partial: true, transcript: t }),
+      onFinal: (_i, t) => void run(t),
+      onError: () => {
+        /* transient (no-speech, etc.) — keep the session; onEnd restarts */
+      },
+      onEnd: () => {
+        if (!sessionRef.current) {
+          const s = usePresenceStore.getState();
+          if (s.phase === "listening") s.setPhase("idle");
+          return;
+        }
+        // Echo-safe restart: wait until Aria finishes speaking, then listen again.
+        const tryRestart = () => {
+          if (!sessionRef.current) return;
+          if (typeof window !== "undefined" && window.speechSynthesis?.speaking) {
+            window.setTimeout(tryRestart, 300);
+            return;
+          }
+          beginListen();
+        };
+        window.setTimeout(tryRestart, 350);
+      },
+    });
+  }, [run]);
+
+  const startSession = useCallback(() => {
+    if (!StreamingSpeechEngine.isSupported()) {
+      usePresenceStore.getState().fail("Voice isn't supported in this browser.");
+      return;
+    }
+    if (sessionRef.current) return;
+    sessionRef.current = true;
+    setActive(true);
+    beginListen();
+  }, [beginListen]);
+
+  const stopSession = useCallback(() => {
+    sessionRef.current = false;
+    setActive(false);
+    engineRef.current?.abort();
+    const s = usePresenceStore.getState();
+    if (s.phase === "listening" || s.phase === "understanding") s.setPhase("idle");
+  }, []);
+
+  const toggleSession = useCallback(() => {
+    if (sessionRef.current) stopSession();
+    else startSession();
+  }, [startSession, stopSession]);
+
+  // Clean up the session if the hook unmounts.
+  useEffect(() => () => {
+    sessionRef.current = false;
+    engineRef.current?.abort();
+  }, []);
+
+  return {
+    listen,
+    stopListening,
+    run,
+    toggleSession,
+    active,
+    supported: StreamingSpeechEngine.isSupported(),
+  };
 }

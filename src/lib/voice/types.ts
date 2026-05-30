@@ -105,6 +105,9 @@ export interface VoiceContext {
   recentDocs: { id: string; title: string; projectId: string }[];
   selection: { id: string; label: string; kind: string } | null;
   textSelection: string | null;
+  /** What's currently on the user's screen (main content) — so Aria sees what
+   *  you see and can resolve "this", "summarize this", "what's on screen". */
+  visibleText: string | null;
 }
 
 export const EMPTY_COMPILE: CompileResult = {
