@@ -37,10 +37,11 @@ export function PresenceLayer() {
       if (!d) return;
       if (d.kind === "command_palette") openPalette();
       else if (d.kind === "theme" && d.theme) setTheme(d.theme);
+      else if (d.kind === "start_session" && !active) toggleSession();
     };
     window.addEventListener("aria:ui", onUi);
     return () => window.removeEventListener("aria:ui", onUi);
-  }, [openPalette, setTheme]);
+  }, [openPalette, setTheme, active, toggleSession]);
 
   // Shortcuts:
   //   F2            — single press toggles Aria's continuous voice session

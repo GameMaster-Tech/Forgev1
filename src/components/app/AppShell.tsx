@@ -16,6 +16,7 @@ import { KeyboardShortcuts } from "@/components/app/KeyboardShortcuts";
 import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PresenceLayer } from "@/components/presence/PresenceLayer";
+import { FirstRunWelcome } from "@/components/onboarding/FirstRunWelcome";
 import { Search } from "lucide-react";
 
 /**
@@ -91,6 +92,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Tutorial />
       {/* AI Presence Layer — ghost cursor + intent overlay + confirmation. */}
       <PresenceLayer />
+      {/* Cold-start: introduce Aria on first run. */}
+      <FirstRunWelcome />
     </div>
   );
 }
