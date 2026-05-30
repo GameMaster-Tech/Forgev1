@@ -57,8 +57,6 @@ export function useGlobalCommands(opts: UseGlobalCommandsOptions = {}) {
       make("projects", "Projects", "/projects", ["workspace"]),
       make("calendar", "Calendar", "/calendar", ["schedule", "time"]),
       make("preview", "Preview", "/preview", ["impact simulator", "what if"]),
-      make("sync", "Checks", "/sync", ["sync", "conflicts", "consistency"]),
-      make("pulse", "Freshness", "/pulse", ["pulse", "decay", "stale"]),
       make("activity", "Activity", "/activity", ["history", "log"]),
       make("teams", "Teams", "/teams", ["collaborators"]),
       make("settings", "Settings", "/settings", ["account", "preferences"]),

@@ -15,17 +15,15 @@ import {
   Search,
   FolderOpen,
   Plus,
-  GitBranch,
-  Activity,
   Calendar,
+  Users,
 } from "lucide-react";
 
 const items: { href: string; icon: typeof Search; label: string }[] = [
   { href: "/research", icon: Search,      label: "Research" },
   { href: "/projects", icon: FolderOpen,  label: "Projects" },
-  { href: "/sync",     icon: GitBranch,   label: "Sync" },
-  { href: "/pulse",    icon: Activity,    label: "Pulse" },
   { href: "/calendar", icon: Calendar,    label: "Calendar" },
+  { href: "/teams",    icon: Users,       label: "Teams" },
 ];
 
 export default function MobileBottomNav({ onNewProject }: { onNewProject?: () => void }) {

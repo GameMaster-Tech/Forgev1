@@ -30,7 +30,6 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   Calendar,
   CalendarPlus,
   ChevronsLeft,
@@ -40,7 +39,6 @@ import {
   FileText,
   FolderOpen,
   FolderPlus,
-  GitBranch,
   History,
   LogOut,
   MessageSquare,
@@ -71,8 +69,6 @@ const navItems: { href: string; icon: typeof Search; label: string }[] = [
   { href: "/projects", icon: FolderOpen, label: "Projects" },
   { href: "/calendar", icon: Calendar, label: "Calendar" },
   { href: "/preview", icon: Sparkles, label: "Preview" },
-  { href: "/sync", icon: GitBranch, label: "Checks" },
-  { href: "/pulse", icon: Activity, label: "Freshness" },
   { href: "/activity", icon: History, label: "Activity" },
   { href: "/teams", icon: Users, label: "Teams" },
   { href: "/settings", icon: Settings, label: "Settings" },
