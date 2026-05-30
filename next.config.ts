@@ -90,12 +90,14 @@ const SECURITY_HEADERS = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Disable powerful features the app never uses. Anyone hot-loading code
   // that tries to ask for them gets a console error rather than silent
-  // success.
+  // success. EXCEPTION: microphone=(self) — Aria, the voice agent, needs the
+  // mic on our own origin (Web Speech API / getUserMedia). Without (self) the
+  // policy hard-blocks the mic regardless of the browser's site permission.
   {
     key: "Permissions-Policy",
     value: [
       "camera=()",
-      "microphone=()",
+      "microphone=(self)",
       "geolocation=()",
       "payment=()",
       "usb=()",

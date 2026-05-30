@@ -68,8 +68,8 @@ export interface SpeechHandlers {
  * On success we release the stream and pause briefly so SpeechRecognition can
  * grab the device cleanly (they contend for the same mic).
  */
-export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string }> {
-  if (typeof window === "undefined") return { ok: false, message: "Voice is only available in the browser." };
+export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string; hardBlock?: boolean }> {
+  if (typeof window === "undefined") return { ok: false, hardBlock: true, message: "Voice is only available in the browser." };
 
   const inIframe = (() => {
     try {
@@ -80,10 +80,12 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
   })();
   const secure = window.isSecureContext;
 
+  // Hard blocks — voice genuinely cannot work; stop and explain.
   if (!secure) {
     console.warn("[aria-mic] insecure context", { origin: window.location?.origin, inIframe });
     return {
       ok: false,
+      hardBlock: true,
       message:
         "Voice needs a secure connection. Open Forge at http://localhost:3000 (not a 192.168.x.x address) or over HTTPS.",
     };
@@ -94,6 +96,7 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
     console.warn("[aria-mic] mediaDevices unavailable", { inIframe });
     return {
       ok: false,
+      hardBlock: true,
       message: inIframe
         ? "The preview frame can't use the microphone. Open Forge in a normal browser tab."
         : "This browser can't access the microphone (mediaDevices unavailable).",
@@ -117,22 +120,28 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
     return { ok: true };
   } catch (err) {
     const name = (err as { name?: string }).name ?? "";
-    console.warn("[aria-mic] getUserMedia failed", { name, permState, inIframe, secure });
+    // Soft failures: getUserMedia and the Web Speech API use DIFFERENT audio
+    // paths, so SpeechRecognition can still succeed even when this pre-flight
+    // rejects (common on Windows where the OS mic-privacy gate trips gUM). We
+    // surface guidance but do NOT hard-block — the engine gets to try, and its
+    // own onError is the final word.
+    console.warn("[aria-mic] getUserMedia failed:", name || "(no name)", { permState, inIframe, secure });
     if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
       return {
         ok: false,
+        hardBlock: false,
         message: inIframe
           ? "Microphone blocked in the preview frame. Open Forge in a normal browser tab to allow it."
-          : "Microphone is blocked. Click the tune/lock icon in the address bar → Microphone → Allow, then reload — Chrome won't prompt again once blocked.",
+          : "If voice doesn't start: allow the mic via the address-bar icon, and on Windows check Settings → Privacy & security → Microphone (let apps + desktop apps access it), then reload.",
       };
     }
     if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      return { ok: false, message: "No microphone found — plug one in and try again." };
+      return { ok: false, hardBlock: false, message: "No microphone detected — plug one in and try again." };
     }
     if (name === "NotReadableError" || name === "TrackStartError") {
-      return { ok: false, message: "Your microphone is in use by another app. Close it (Zoom/Meet/etc.) and try again." };
+      return { ok: false, hardBlock: false, message: "Your microphone may be in use by another app (Zoom/Meet/etc.). Close it if voice doesn't start." };
     }
-    return { ok: false, message: `Couldn't access the microphone (${name || "unknown error"}). Check your browser's mic permissions.` };
+    return { ok: false, hardBlock: false, message: `Mic pre-flight failed (${name || "unknown"}); trying voice anyway.` };
   }
 }
 

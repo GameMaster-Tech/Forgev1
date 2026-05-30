@@ -314,12 +314,14 @@ export function useAria() {
       return;
     }
     const access = await ensureMicAccess();
-    if (!access.ok) {
+    if (!access.ok && access.hardBlock) {
       const m = access.message ?? "Microphone unavailable.";
       p.fail(m);
       speak(m);
       return;
     }
+    // Soft pre-flight failure → proceed; SpeechRecognition may still work, and
+    // its onError is the final word.
     const engine = engineRef.current ?? new StreamingSpeechEngine();
     engineRef.current = engine;
     p.setSource("voice");
@@ -415,12 +417,13 @@ export function useAria() {
       // Make sure we actually have the mic (and surface a fix if not) BEFORE we
       // flip the session on — otherwise it would loop on "listening".
       const access = await ensureMicAccess();
-      if (!access.ok) {
+      if (!access.ok && access.hardBlock) {
         const m = access.message ?? "Microphone unavailable.";
         p.fail(m);
         speak(m);
         return;
       }
+      // Soft pre-flight failure → start anyway; SpeechRecognition may still work.
       sessionRef.current = true;
       setActive(true);
       beginListen();
