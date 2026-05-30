@@ -14,8 +14,10 @@ import { InlineMath, BlockMath } from "./extensions/Math";
 import { ClaimMention, type ClaimTrustResolver } from "./extensions/ClaimMention";
 import { DataTable } from "./extensions/DataTable";
 import { InlineEmbed } from "./extensions/InlineEmbed";
+import { Image } from "./extensions/ImageUpload";
 import { LivingSection } from "./extensions/LivingSection/extension";
 import { CommentMark } from "./extensions/CommentMark";
+import { cleanPastedHTML } from "./clean-paste";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { filterSlashCommands, type SlashCommand } from "./slashCommands";
 import {
@@ -57,6 +59,7 @@ import {
   Table,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -171,6 +174,13 @@ interface ForgeEditorProps {
    * state. Gates the one-time HTML→Y.Doc seed for migrated documents.
    */
   collabSynced?: boolean;
+  /**
+   * Optional image uploader. When supplied, pasted / dropped image files
+   * are uploaded and inserted inline. Returns the URL to embed (a Storage
+   * download URL, or a data-URL fallback), or null on failure. When
+   * absent, image paste falls through to default behaviour.
+   */
+  onImageUpload?: (file: File) => Promise<string | null>;
 }
 
 /* ─── Toolbar button ─── */
@@ -662,6 +672,7 @@ export default function ForgeEditor({
   resolveClaimTrust,
   ydoc,
   collabSynced,
+  onImageUpload,
 }: ForgeEditorProps) {
   const collab = !!ydoc;
   const [isFocused, setIsFocused] = useState(false);
@@ -766,6 +777,38 @@ export default function ForgeEditor({
     claimResolverRef.current = resolveClaimTrust;
   }, [resolveClaimTrust]);
 
+  // Keep the uploader in a ref so paste/drop handlers (captured once at
+  // editor construction) always call the latest function.
+  const onImageUploadRef = useRef(onImageUpload);
+  useEffect(() => {
+    onImageUploadRef.current = onImageUpload;
+  }, [onImageUpload]);
+
+  // Upload pasted/dropped image files and insert them inline. Returns
+  // true when at least one image was handled (so the caller can preventDefault).
+  const insertImageFiles = useCallback((files: File[]): boolean => {
+    const upload = onImageUploadRef.current;
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (!upload || images.length === 0) return false;
+    void (async () => {
+      for (const file of images) {
+        const id = toast.loading(`Uploading ${file.name || "image"}…`);
+        try {
+          const url = await upload(file);
+          if (url) {
+            editorRef.current?.chain().focus().setImage({ src: url, alt: file.name }).run();
+            toast.success("Image added", { id });
+          } else {
+            toast.error("Couldn't add image — it may be too large.", { id });
+          }
+        } catch {
+          toast.error("Image upload failed", { id });
+        }
+      }
+    })();
+    return true;
+  }, []);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -796,6 +839,7 @@ export default function ForgeEditor({
       BlockMath,
       DataTable,
       InlineEmbed,
+      Image,
       LivingSection,
       CommentMark,
       ClaimMention.configure({
@@ -811,6 +855,32 @@ export default function ForgeEditor({
     editorProps: {
       attributes: {
         class: "focus:outline-none",
+      },
+      // Scrub Word / Google-Docs / web markup before ProseMirror parses
+      // it — strips mso cruft, the Google-Docs bold wrapper, stray
+      // attributes; keeps lists, links, images, and real emphasis.
+      transformPastedHTML: (html) => cleanPastedHTML(html),
+      // Image paste — when the clipboard carries image files, upload and
+      // embed them instead of letting the browser drop a raw blob URL.
+      handlePaste: (_view, event) => {
+        const files = event.clipboardData?.files;
+        if (files && files.length > 0) {
+          const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+          if (imgs.length > 0) return insertImageFiles(imgs);
+        }
+        return false;
+      },
+      // Drag-and-drop image files from the desktop / another app.
+      handleDrop: (_view, event) => {
+        const files = (event as DragEvent).dataTransfer?.files;
+        if (files && files.length > 0) {
+          const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+          if (imgs.length > 0) {
+            event.preventDefault();
+            return insertImageFiles(imgs);
+          }
+        }
+        return false;
       },
       // Drive slash-menu navigation from ProseMirror's keydown so the
       // menu and the editor selection never fight over the arrow keys.

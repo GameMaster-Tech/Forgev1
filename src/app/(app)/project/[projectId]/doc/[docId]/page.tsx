@@ -37,6 +37,7 @@ import {
   exportDocumentMarkdown,
   exportDocumentHtml,
 } from "@/lib/io/document-export";
+import { uploadImageWithFallback } from "@/lib/firebase/storage";
 import ForgeEditor, {
   type EditorHandle,
 } from "@/components/editor/ForgeEditor";
@@ -199,6 +200,21 @@ export default function EditorPage({
     wordCountRef.current = count;
     setWordCount(count);
   }, []);
+
+  // Upload pasted/dropped images to Storage (data-URL fallback offline).
+  const handleImageUpload = useCallback(
+    async (file: File): Promise<string | null> => {
+      if (!user?.uid) return null;
+      const result = await uploadImageWithFallback(user.uid, docId, file);
+      if (result?.fallback) {
+        toast.message("Embedded image inline", {
+          description: "Storage was unavailable, so the image is stored in the document itself.",
+        });
+      }
+      return result?.url ?? null;
+    },
+    [user?.uid, docId],
+  );
 
   const handleEditorUpdate = useCallback(
     (html?: string) => {
@@ -535,6 +551,7 @@ export default function EditorPage({
             collabSynced={collabSynced}
             onUpdate={handleEditorUpdate}
             onWordCountChange={handleWordCount}
+            onImageUpload={handleImageUpload}
             onReady={(handle) => {
               editorHandleRef.current = handle;
               setEditor(handle.editor);

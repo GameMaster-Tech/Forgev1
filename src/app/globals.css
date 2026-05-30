@@ -607,6 +607,20 @@ html {
   padding: 1px 3px;
 }
 
+/* Inline images — pasted / dropped, uploaded to Storage. Square-edged to
+ * match the Obsidian-Ink scheme; selected state gets a violet ring. */
+.ProseMirror img.forge-editor-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em 0;
+  border: 1px solid var(--border);
+}
+.ProseMirror img.forge-editor-image.ProseMirror-selectednode {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+
 /* Living Section — derived content renders inside a React node view, outside
  * the .ProseMirror tree, so it needs its own readable type rules. Kept tight
  * and calm to match the Obsidian Ink scheme. */
