@@ -1,229 +1,276 @@
 "use client";
 
+/**
+ * Hero — voice-native landing centerpiece.
+ *
+ * A cinematic dark stage (independent of theme) with Forge's signature amber
+ * "voice" glow + indigo. The right side runs a looping, illustrative demo of the
+ * Aria loop: listening (live waveform) → heard (transcript) → acting (ghost
+ * cursor types a doc). No real audio — pure staged motion, à la Notion's hero
+ * vignettes.
+ */
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, BookOpen, Microscope } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowRight, Mic } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
+const TRANSCRIPT = "Write a brief on AI's impact on jobs in India";
+const DRAFT =
+  "AI is reshaping India's labor market — automating routine tasks while creating demand for new, higher-skill roles.";
 
-const floatingBadges = [
-  { label: "200M+ Sources", icon: BookOpen, color: "text-cyan", bg: "bg-cyan/10", border: "border-cyan/20", x: "right-0 lg:right-8", y: "top-12" },
-  { label: "DOI Verified", icon: BadgeCheck, color: "text-green", bg: "bg-green/10", border: "border-green/20", x: "right-4 lg:right-0", y: "top-48" },
-  { label: "Deep Analysis", icon: Microscope, color: "text-violet", bg: "bg-violet/10", border: "border-violet/20", x: "right-12 lg:right-16", y: "bottom-24" },
-];
+/** 0 listening · 1 heard · 2 acting (typing) — loops forever. */
+function usePhase() {
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const durations = [2200, 1500, 4200];
+    const t = setTimeout(() => setPhase((p) => (p + 1) % 3), durations[phase]);
+    return () => clearTimeout(t);
+  }, [phase]);
+  return phase;
+}
 
 export default function Hero() {
-  return (
-    <section className="relative min-h-screen flex items-center overflow-hidden pt-20">
-      {/* Background layers */}
-      <div className="absolute inset-0 bg-background" />
-      <div
-        className="absolute inset-0 opacity-[0.03] dark:opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, var(--foreground) 0.5px, transparent 0)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-      {/* Dramatic gradient wash */}
-      <div className="absolute top-0 right-0 w-[70%] h-full bg-gradient-to-bl from-violet/[0.06] via-transparent to-transparent pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[50%] h-[60%] bg-gradient-to-tr from-cyan/[0.04] via-transparent to-transparent pointer-events-none" />
+  const phase = usePhase();
 
-      <div className="relative max-w-7xl mx-auto px-6 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center min-h-[85vh]">
-          {/* Left — Content */}
+  return (
+    <section
+      className="relative min-h-screen flex items-center overflow-hidden"
+      style={{ background: "#0A0812", color: "#F4F1EA" }}
+    >
+      {/* Atmosphere: amber voice glow + indigo, grain, dot grid */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: "radial-gradient(120% 90% at 78% 12%, rgba(226,180,102,0.16), transparent 55%), radial-gradient(90% 80% at 10% 90%, rgba(99,102,241,0.14), transparent 55%)" }}
+      />
+      <div
+        className="absolute inset-0 opacity-[0.06] pointer-events-none"
+        style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #F4F1EA 0.5px, transparent 0)", backgroundSize: "34px 34px" }}
+      />
+
+      <div className="relative max-w-7xl mx-auto px-6 w-full py-28">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] gap-14 lg:gap-10 items-center">
+          {/* ── Left: the pitch ── */}
           <div className="max-w-xl">
-            {/* Overline */}
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.4, ease }}
-              className="flex items-center gap-3 mb-8"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease }}
+              className="inline-flex items-center gap-2.5 rounded-full border px-3.5 py-1.5 mb-8"
+              style={{ borderColor: "rgba(226,180,102,0.35)", background: "rgba(226,180,102,0.07)" }}
             >
-              <div className="w-8 h-[2px] bg-violet" />
-              <span className="text-[11px] font-semibold text-violet uppercase tracking-[0.2em]">
-                AI Research Workspace
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping" style={{ background: "#E2B466" }} />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: "#E2B466" }} />
+              </span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: "#E2B466" }}>
+                The AI-voice-native workspace
               </span>
             </motion.div>
 
-            {/* Headline */}
             <motion.h1
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 0, y: 28 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, ease, delay: 0.08 }}
-              className="font-display font-extrabold text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] tracking-[-0.03em] text-black dark:text-foreground mb-6"
+              transition={{ duration: 0.6, ease, delay: 0.06 }}
+              className="font-display font-black leading-[0.98] tracking-[-0.035em] text-[clamp(2.8rem,6.4vw,5rem)]"
             >
-              Research and
+              Just say it.
               <br />
-              write in
-              <br />
-              <span className="relative inline-block">
-                <span className="relative z-10 bg-gradient-to-r from-violet via-violet to-cyan bg-clip-text text-transparent">
-                  one place.
-                </span>
-              </span>
+              <span style={{ fontStyle: "italic", fontWeight: 500, color: "#E2B466", fontFamily: "Georgia, 'Times New Roman', serif" }}>
+                Forge
+              </span>{" "}
+              does the rest.
             </motion.h1>
 
-            {/* Subheadline */}
             <motion.p
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease, delay: 0.16 }}
-              className="text-lg text-gray leading-relaxed mb-10 max-w-md"
+              transition={{ duration: 0.5, ease, delay: 0.16 }}
+              className="mt-7 text-[1.05rem] leading-relaxed max-w-md"
+              style={{ color: "rgba(244,241,234,0.62)" }}
             >
-              Forge searches 200M+ papers, checks every citation, and helps you write.
-              No more flipping between tabs.
+              Meet <span style={{ color: "#F4F1EA", fontWeight: 600 }}>Aria</span> — your voice in Forge. Navigate,
+              create projects and documents, schedule, and research, all hands-free. You talk; she does it while you watch.
             </motion.p>
 
-            {/* CTAs */}
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease, delay: 0.24 }}
-              className="flex flex-col sm:flex-row items-start gap-4 mb-12"
+              transition={{ duration: 0.5, ease, delay: 0.24 }}
+              className="mt-10 flex flex-col sm:flex-row items-start gap-3.5"
             >
               <Link
                 href="/auth/signup"
-                className="group relative flex items-center gap-3 bg-violet text-white px-8 py-4 text-base font-semibold overflow-hidden btn-glow-violet"
+                className="group inline-flex items-center gap-2.5 rounded-[0.5rem] px-7 py-3.5 text-[15px] font-semibold transition-transform active:scale-[0.98]"
+                style={{ background: "#E2B466", color: "#0A0812", boxShadow: "0 14px 40px -12px rgba(226,180,102,0.6)" }}
               >
-                <span className="relative z-10">Get started — free</span>
-                <ArrowRight
-                  size={16}
-                  className="relative z-10 group-hover:translate-x-1 transition-transform duration-200"
-                />
+                <Mic size={16} strokeWidth={2.5} />
+                Start with your voice
+                <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
               </Link>
               <a
                 href="#how-it-works"
-                className="flex items-center gap-2 text-gray hover:text-black dark:hover:text-foreground border border-border hover:border-violet/40 px-6 py-4 transition-all duration-200 text-base"
+                className="inline-flex items-center gap-2 rounded-[0.5rem] px-6 py-3.5 text-[15px] transition-colors"
+                style={{ border: "1px solid rgba(244,241,234,0.18)", color: "rgba(244,241,234,0.85)" }}
               >
-                How it works
+                See it work
               </a>
             </motion.div>
 
-            {/* Stats strip */}
-            <motion.div
+            <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.4, ease, delay: 0.32 }}
-              className="flex items-center gap-8"
+              transition={{ duration: 0.5, ease, delay: 0.36 }}
+              className="mt-6 text-[12px]"
+              style={{ color: "rgba(244,241,234,0.4)" }}
             >
-              {[
-                { value: "200M+", label: "Sources" },
-                { value: "150M+", label: "Verified DOIs" },
-                { value: "<2s", label: "Avg. Response" },
-              ].map((stat, i) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, ease, delay: 0.4 + i * 0.06 }}
-                >
-                  <div className="font-display font-bold text-xl text-black dark:text-foreground">
-                    {stat.value}
-                  </div>
-                  <div className="text-[10px] text-muted uppercase tracking-wider mt-0.5">
-                    {stat.label}
-                  </div>
-                </motion.div>
-              ))}
-            </motion.div>
+              Press{" "}
+              <kbd className="px-1.5 py-0.5 rounded border text-[11px]" style={{ borderColor: "rgba(244,241,234,0.2)", color: "rgba(244,241,234,0.7)" }}>
+                F2
+              </kbd>{" "}
+              anywhere — no setup, no typing required.
+            </motion.p>
           </div>
 
-          {/* Right — Product mockup */}
+          {/* ── Right: the looping Aria demo ── */}
           <motion.div
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
+            initial={{ opacity: 0, scale: 0.96, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.7, ease, delay: 0.2 }}
-            className="relative hidden lg:block"
+            className="relative"
           >
-            {/* Main mockup window */}
-            <div className="relative bg-white dark:bg-surface border border-border shadow-2xl dark:shadow-[0_25px_50px_rgba(0,0,0,0.5)]">
-              {/* Window chrome */}
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-surface-light dark:bg-surface">
-                <div className="flex gap-1.5">
-                  <div className="w-2.5 h-2.5 bg-red/60" />
-                  <div className="w-2.5 h-2.5 bg-amber/60" />
-                  <div className="w-2.5 h-2.5 bg-green/60" />
-                </div>
-                <div className="flex-1 mx-8">
-                  <div className="h-5 bg-background border border-border flex items-center px-3">
-                    <span className="text-[9px] text-muted">forge.research/project/sleep-cognition</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Content area */}
-              <div className="p-6 space-y-4">
-                {/* Search bar mockup */}
-                <div className="border border-violet/30 bg-violet/[0.03] p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-1.5 h-1.5 bg-violet animate-pulse" />
-                    <span className="text-[9px] font-semibold text-violet uppercase tracking-wider">Research Query</span>
-                  </div>
-                  <p className="text-sm text-black/70 dark:text-foreground/70">
-                    &ldquo;Impact of sleep deprivation on judicial decision-making&rdquo;
-                  </p>
-                </div>
-
-                {/* Results mockup */}
-                <div className="space-y-2">
-                  {[
-                    { title: "Cho et al. (2024)", journal: "Nature Neuroscience", verified: true },
-                    { title: "Danziger et al. (2011)", journal: "PNAS", verified: true },
-                    { title: "Walker & Stickgold (2022)", journal: "Ann. Rev. Psychology", verified: true },
-                  ].map((paper, i) => (
-                    <motion.div
-                      key={i}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.3, ease, delay: 0.8 + i * 0.12 }}
-                      className="flex items-center justify-between border border-border px-3 py-2.5 bg-white dark:bg-surface"
-                    >
-                      <div>
-                        <p className="text-xs font-medium text-black/80 dark:text-foreground/80">{paper.title}</p>
-                        <p className="text-[10px] text-muted">{paper.journal}</p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <BadgeCheck size={12} className="text-green" />
-                        <span className="text-[9px] text-green font-semibold">Verified</span>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-
-                {/* Writing area mockup */}
-                <div className="border border-border p-4 bg-surface-light dark:bg-surface-light">
-                  <p className="text-[11px] text-black/60 dark:text-foreground/60 leading-[1.8]">
-                    Sleep deprivation significantly impairs judicial cognition, with fatigued judges demonstrating{" "}
-                    <span className="bg-green/10 border-b-2 border-green px-0.5">
-                      measurably harsher sentencing
-                      <sup className="text-[7px] text-green font-bold ml-0.5">[1]</sup>
-                    </span>{" "}
-                    and reduced capacity for complex reasoning...
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Floating badges */}
-            {floatingBadges.map((badge, i) => {
-              const Icon = badge.icon;
-              return (
-                <motion.div
-                  key={badge.label}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.4, ease, delay: 1.2 + i * 0.15 }}
-                  className={`absolute ${badge.x} ${badge.y} flex items-center gap-2 px-3 py-2 ${badge.bg} border ${badge.border} backdrop-blur-sm shadow-lg`}
-                >
-                  <Icon size={12} className={badge.color} />
-                  <span className={`text-[10px] font-semibold ${badge.color}`}>{badge.label}</span>
-                </motion.div>
-              );
-            })}
+            <AriaDemo phase={phase} />
           </motion.div>
         </div>
       </div>
+
+      {/* bottom fade into the next (light) section */}
+      <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none" style={{ background: "linear-gradient(to bottom, transparent, #0A0812)" }} />
     </section>
+  );
+}
+
+/* ───────────────────────── the demo ───────────────────────── */
+
+function AriaDemo({ phase }: { phase: number }) {
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden"
+      style={{ borderColor: "rgba(244,241,234,0.1)", background: "rgba(255,255,255,0.02)", boxShadow: "0 40px 90px -30px rgba(0,0,0,0.8)" }}
+    >
+      {/* window chrome */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: "rgba(244,241,234,0.08)" }}>
+        <div className="flex gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(244,241,234,0.18)" }} />
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(244,241,234,0.18)" }} />
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(244,241,234,0.18)" }} />
+        </div>
+        <div className="flex-1 text-center text-[10px]" style={{ color: "rgba(244,241,234,0.3)" }}>
+          forge — AI Impact
+        </div>
+      </div>
+
+      <div className="p-5 min-h-[340px] flex flex-col">
+        {/* Aria status row */}
+        <div className="flex items-center gap-2.5 mb-4">
+          <span
+            className="w-7 h-7 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(226,180,102,0.14)", color: "#E2B466" }}
+          >
+            <Mic size={13} strokeWidth={2.5} />
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "#E2B466" }}>
+            {phase === 0 ? "Aria · listening" : phase === 1 ? "Aria · understood" : "Aria · writing"}
+          </span>
+        </div>
+
+        {/* Waveform (listening) */}
+        <Waveform active={phase === 0} />
+
+        {/* Transcript chip */}
+        <AnimatePresence>
+          {phase >= 1 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3, ease }}
+              className="mt-1 rounded-lg px-3.5 py-2.5 text-[13px]"
+              style={{ background: "rgba(244,241,234,0.05)", border: "1px solid rgba(244,241,234,0.1)", color: "rgba(244,241,234,0.9)" }}
+            >
+              <span style={{ color: "#E2B466" }}>“</span>
+              {TRANSCRIPT}
+              <span style={{ color: "#E2B466" }}>”</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* The doc being written */}
+        <AnimatePresence>
+          {phase === 2 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35, ease }}
+              className="mt-4 flex-1 rounded-lg p-4"
+              style={{ background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.22)" }}
+            >
+              <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: "#818CF8" }}>
+                ⁂ AI Impact
+              </div>
+              <Typewriter text={DRAFT} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function Waveform({ active }: { active: boolean }) {
+  const bars = 28;
+  return (
+    <div className="flex items-center justify-center gap-[3px] h-16 mb-2">
+      {Array.from({ length: bars }).map((_, i) => (
+        <motion.span
+          key={i}
+          className="w-[3px] rounded-full"
+          style={{ background: active ? "#E2B466" : "rgba(244,241,234,0.15)" }}
+          animate={
+            active
+              ? { height: [6, 10 + ((i * 37) % 38), 6] }
+              : { height: 5 }
+          }
+          transition={
+            active
+              ? { duration: 0.7 + (i % 5) * 0.12, repeat: Infinity, ease: "easeInOut", delay: (i % 7) * 0.05 }
+              : { duration: 0.3 }
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function Typewriter({ text }: { text: string }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    const id = setInterval(() => setN((v) => (v >= text.length ? v : v + 1)), 28);
+    return () => clearInterval(id);
+  }, [text]);
+  return (
+    <p className="text-[13px] leading-[1.7]" style={{ color: "rgba(244,241,234,0.82)" }}>
+      {text.slice(0, n)}
+      <motion.span
+        aria-hidden
+        className="inline-block w-[2px] h-[14px] align-middle ml-[1px]"
+        style={{ background: "#E2B466" }}
+        animate={{ opacity: [1, 0, 1] }}
+        transition={{ duration: 0.9, repeat: Infinity }}
+      />
+    </p>
   );
 }
