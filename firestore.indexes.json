@@ -32,6 +32,16 @@
     },
 
     {
+      "_comment": "Voice chats — Aria conversation history per user, newest-first (userId + createdAt). Reads sort client-side too, so history loads even before this is deployed.",
+      "collectionGroup": "voiceMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    {
       "_comment": "Documents — list per project.",
       "collectionGroup": "documents",
       "queryScope": "COLLECTION",

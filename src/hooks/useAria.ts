@@ -20,6 +20,7 @@ import { StreamingSpeechEngine } from "@/lib/presence/audio";
 import { spatialTracker } from "@/lib/presence/spatial";
 import { DirectiveParser } from "@/lib/voice/stream";
 import { executeDirective, type ExecDeps } from "@/lib/voice/execute";
+import { saveVoiceMessage } from "@/lib/firebase/voiceChats";
 import type { VoiceContext } from "@/lib/voice/types";
 
 function speak(text: string) {
@@ -93,9 +94,11 @@ export function useAria() {
         router,
         projects: ctx.projects,
         currentProjectId: ctx.currentProjectId,
+        currentDocId: ctx.currentDocId,
       };
       const created = new Map<string, string>();
       const parser = new DirectiveParser();
+      const actionTypes: string[] = [];
       let speech = "";
 
       try {
@@ -140,7 +143,10 @@ export function useAria() {
                   transcript,
                 });
               }
-              for (const d of directives) void executeDirective(d, deps, created);
+              for (const d of directives) {
+                actionTypes.push(d.type);
+                void executeDirective(d, deps, created);
+              }
             }
             if (evt.done) {
               const tail = parser.flush();
@@ -165,6 +171,9 @@ export function useAria() {
           { role: "user" as const, content: transcript },
           { role: "assistant" as const, content: clean },
         ].slice(-8);
+
+        // Persist the exchange (best-effort; never blocks the voice flow).
+        void saveVoiceMessage(user.uid, { transcript, reply: clean, actions: actionTypes });
 
         const ps = usePresenceStore.getState();
         if (ps.phase !== "confirming") {
