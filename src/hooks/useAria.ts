@@ -60,6 +60,39 @@ export function useAria() {
     return () => spatialTracker.stop();
   }, []);
 
+  // Cold-start kill: once per session, pre-warm the voice path (Groq TLS +
+  // route boot) and prefetch the top destinations, so the first command is fast.
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+    try {
+      if (window.sessionStorage.getItem("forge.aria.warm")) return;
+      window.sessionStorage.setItem("forge.aria.warm", "1");
+    } catch {
+      /* private mode — warm anyway, just don't dedupe */
+    }
+    const r = router as { prefetch?: (href: string) => void };
+    for (const route of ["/projects", "/research", "/calendar"]) {
+      try {
+        r.prefetch?.(route);
+      } catch {
+        /* best-effort */
+      }
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await user.getIdToken();
+        if (cancelled) return;
+        await fetch("/api/voice/warm", { headers: { Authorization: `Bearer ${token}` } });
+      } catch {
+        /* warm is best-effort */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, router]);
+
   const gatherContext = useCallback((): VoiceContext => {
     const projects = useProjectsStore.getState().projects.map((p) => ({ id: p.id, name: p.name }));
     const route = pathnameRef.current ?? "/";
