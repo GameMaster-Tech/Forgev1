@@ -25,6 +25,7 @@ import {
   Type,
   Activity,
   Trash2,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -168,6 +169,25 @@ export default function SettingsPage() {
       setSigningOut(false);
     }
   }, [router]);
+
+  const [downloadingData, setDownloadingData] = useState(false);
+  const handleDownloadData = useCallback(async () => {
+    if (!user?.uid || downloadingData) return;
+    setDownloadingData(true);
+    const id = toast.loading("Gathering your workspace…");
+    try {
+      const { downloadWorkspaceJson } = await import("@/lib/io/workspace-export");
+      const data = await downloadWorkspaceJson(user.uid);
+      toast.success(
+        `Downloaded ${data.projectCount} project${data.projectCount === 1 ? "" : "s"} · ${data.documentCount} document${data.documentCount === 1 ? "" : "s"}`,
+        { id },
+      );
+    } catch {
+      toast.error("Couldn't export your data", { id });
+    } finally {
+      setDownloadingData(false);
+    }
+  }, [user?.uid, downloadingData]);
 
   const maskedExaKey = "255a6e......-....-....-............690677";
 
@@ -359,6 +379,19 @@ export default function SettingsPage() {
                         <Trash2 size={14} />
                         Trash &amp; recovery
                       </Link>
+                      <button
+                        onClick={handleDownloadData}
+                        disabled={downloadingData}
+                        title="Export every project and document as JSON"
+                        className="flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground border border-border hover:border-violet/40 hover:bg-violet/[0.04] px-4 py-2.5 transition-colors duration-200 disabled:opacity-50"
+                      >
+                        {downloadingData ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Download size={14} />
+                        )}
+                        Download my data
+                      </button>
                       <button
                         onClick={handleSignOut}
                         disabled={signingOut}

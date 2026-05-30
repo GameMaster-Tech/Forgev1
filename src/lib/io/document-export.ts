@@ -135,3 +135,31 @@ export function exportDocumentMarkdown(title: string, html: string) {
 export function exportDocumentHtml(title: string, html: string) {
   downloadFile(`${filenameSlug(title)}.html`, documentToHtml(title, html), "text/html");
 }
+
+/**
+ * Open the document in a print-ready window and invoke the browser print
+ * dialog — the dependency-free path to a PDF ("Save as PDF" in print).
+ * Returns false when a popup blocker prevented the window from opening.
+ */
+export function printDocument(title: string, html: string): boolean {
+  const win = window.open("", "_blank", "noopener,noreferrer,width=820,height=1000");
+  if (!win) return false;
+  win.document.open();
+  win.document.write(documentToHtml(title, html));
+  win.document.close();
+  // Give the new document a tick to lay out before printing.
+  win.addEventListener("load", () => {
+    win.focus();
+    win.print();
+  });
+  // Fallback for browsers that fire load before the listener attaches.
+  setTimeout(() => {
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      /* already printed or closed */
+    }
+  }, 400);
+  return true;
+}

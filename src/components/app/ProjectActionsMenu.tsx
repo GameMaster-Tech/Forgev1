@@ -27,7 +27,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useProjectsStore, type Project } from "@/store/projects";
-import { ExportDialog } from "@/components/io/ExportDialog";
+import { useAuth } from "@/context/AuthContext";
+import { getProjectDocuments } from "@/lib/firebase/firestore";
+import { exportProjectMarkdown } from "@/lib/io/workspace-export";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -43,14 +45,33 @@ export function ProjectActionsMenu({
 }) {
   const updateProject = useProjectsStore((s) => s.updateProject);
   const deleteProject = useProjectsStore((s) => s.deleteProject);
+  const { user } = useAuth();
 
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isArchived = project.status === "archived";
+
+  // Client-side export — reads the user's own docs through Firestore
+  // rules, never the Admin-credential server route, so it can't silently
+  // fail when a service account isn't provisioned.
+  const handleExport = useCallback(async () => {
+    if (!user?.uid) return;
+    setBusy(true);
+    const id = toast.loading("Exporting project…");
+    try {
+      const docs = await getProjectDocuments(project.id, user.uid);
+      exportProjectMarkdown(project.name, docs);
+      toast.success(`Exported ${docs.length} document${docs.length === 1 ? "" : "s"}`, { id });
+      setOpen(false);
+    } catch {
+      toast.error("Couldn't export project", { id });
+    } finally {
+      setBusy(false);
+    }
+  }, [user?.uid, project.id, project.name]);
 
   const handleArchiveToggle = useCallback(async () => {
     setBusy(true);
@@ -133,11 +154,9 @@ export function ProjectActionsMenu({
                 />
                 <MenuButton
                   icon={Download}
-                  label="Export"
-                  onClick={() => {
-                    setExporting(true);
-                    setOpen(false);
-                  }}
+                  label="Export Markdown"
+                  busy={busy}
+                  onClick={handleExport}
                 />
                 <MenuButton
                   icon={Trash2}
@@ -172,12 +191,6 @@ export function ProjectActionsMenu({
         busy={busy}
         onCancel={() => setConfirming(false)}
         onConfirm={handleDelete}
-      />
-
-      <ExportDialog
-        open={exporting}
-        onClose={() => setExporting(false)}
-        projectId={project.id}
       />
     </>
   );

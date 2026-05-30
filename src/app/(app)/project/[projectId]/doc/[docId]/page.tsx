@@ -17,6 +17,7 @@ import {
   GitBranch,
   FileText,
   FileCode,
+  Printer,
   ChevronRight,
   AlertTriangle,
   RefreshCw,
@@ -36,6 +37,7 @@ import { useDocumentAutosave } from "@/hooks/useDocumentAutosave";
 import {
   exportDocumentMarkdown,
   exportDocumentHtml,
+  printDocument,
 } from "@/lib/io/document-export";
 import { uploadImageWithFallback } from "@/lib/firebase/storage";
 import ForgeEditor, {
@@ -250,6 +252,13 @@ export default function EditorPage({
     setExportOpen(false);
     setShowMenu(false);
     toast.success("Exported HTML");
+  }, [title, currentHtml]);
+
+  const handleExportPdf = useCallback(() => {
+    const ok = printDocument(title, currentHtml());
+    setExportOpen(false);
+    setShowMenu(false);
+    if (!ok) toast.error("Allow popups to print / save as PDF");
   }, [title, currentHtml]);
 
   const handleDuplicate = useCallback(async () => {
@@ -474,6 +483,14 @@ export default function EditorPage({
                           >
                             <FileCode size={13} strokeWidth={1.75} />
                             <span>HTML (.html)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExportPdf}
+                            className="w-full flex items-center gap-2.5 pl-8 pr-3.5 py-2 text-[12px] text-foreground/80 hover:text-foreground hover:bg-foreground/[0.04] transition-colors"
+                          >
+                            <Printer size={13} strokeWidth={1.75} />
+                            <span>PDF / Print</span>
                           </button>
                         </motion.div>
                       )}

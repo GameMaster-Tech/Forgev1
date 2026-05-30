@@ -30,8 +30,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
 import { getUserDocuments, type FirestoreDocument } from "@/lib/firebase/firestore";
 
-const MAX_DOCS = 80;
-const SNIPPET_CHARS = 280;
+const MAX_DOCS = 120;
+// Fold a generous slice of body text into the palette keywords so ⌘K
+// matches on document *content*, not just titles.
+const SNIPPET_CHARS = 2000;
 
 /** Strip HTML/TipTap markup to a flat string for content matching. */
 function toPlainSnippet(content: unknown): string {

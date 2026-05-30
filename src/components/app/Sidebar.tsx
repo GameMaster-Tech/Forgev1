@@ -28,7 +28,7 @@
 
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Calendar,
@@ -67,7 +67,8 @@ const EXPANDED_W = 260;
 const STORAGE_KEY = "forge.sidebar.expanded.v1";
 
 const navItems: { href: string; icon: typeof Search; label: string }[] = [
-  { href: "/research", icon: Search, label: "Research" },
+  { href: "/search", icon: Search, label: "Search" },
+  { href: "/research", icon: MessageSquare, label: "Research" },
   { href: "/projects", icon: FolderOpen, label: "Projects" },
   { href: "/calendar", icon: Calendar, label: "Calendar" },
   { href: "/preview", icon: Sparkles, label: "Preview" },
