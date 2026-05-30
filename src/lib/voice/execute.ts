@@ -22,8 +22,8 @@ import {
   deleteTeam,
 } from "@/lib/firebase/firestore";
 import { usePresenceStore } from "@/store/presence";
-import { resolveTargetId } from "@/lib/presence/spatial";
-import type { ConfirmationDecision, PresenceTarget } from "@/lib/presence/types";
+import { choreographClick } from "./choreograph";
+import type { ConfirmationDecision } from "@/lib/presence/types";
 import type { VoiceAction } from "./types";
 
 export interface ExecDeps {
@@ -50,14 +50,6 @@ const SECTION_ROUTES: Record<string, string> = {
   home: "/projects",
 };
 
-function centerRect(): PresenceTarget["rect"] {
-  const w = typeof window !== "undefined" ? window.innerWidth : 1280;
-  const h = typeof window !== "undefined" ? window.innerHeight : 800;
-  return { x: w / 2 - 12, y: h / 2 - 12, width: 24, height: 24 };
-}
-function routeTarget(route: string, label?: string): PresenceTarget {
-  return resolveTargetId(`nav:${route}`) ?? { id: `route:${route}`, label, kind: "nav", rect: centerRect() };
-}
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -87,13 +79,17 @@ function awaitDecision(id: string): Promise<ConfirmationDecision> {
 function dispatchUi(detail: Record<string, unknown>) {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("aria:ui", { detail }));
 }
-function navTo(route: string, label: string, deps: ExecDeps) {
+function navTo(route: string, label: string, deps: ExecDeps): void {
   const p = usePresenceStore.getState();
-  p.setPhase("navigating");
-  p.setTarget(routeTarget(route, label));
   const id = p.startAction({ label: `Opening ${label}`, phase: "navigating" });
-  deps.router.push(route);
-  p.finishAction(id, "done");
+  // Walk the ghost to the matching sidebar anchor and "click" it before the
+  // route actually changes. If no anchor is mounted the choreographer parks at
+  // screen-center — either way the navigation fires at the click beat. Runs
+  // detached so navTo keeps its void signature (callers don't await).
+  void choreographClick(`nav:${route}`, label, () => deps.router.push(route)).then(
+    () => p.finishAction(id, "done"),
+    () => p.finishAction(id, "failed"),
+  );
 }
 function track(label: string, phase: "executing", fn: () => Promise<void>): Promise<void> {
   const p = usePresenceStore.getState();

@@ -15,9 +15,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
 import { usePresenceStore } from "@/store/presence";
-import { toConfidence } from "@/lib/presence/types";
+import { toConfidence, type PredictedIntent } from "@/lib/presence/types";
 import { StreamingSpeechEngine } from "@/lib/presence/audio";
-import { spatialTracker } from "@/lib/presence/spatial";
+import { spatialTracker, resolveTargetId } from "@/lib/presence/spatial";
 import { DirectiveParser } from "@/lib/voice/stream";
 import { executeDirective, type ExecDeps } from "@/lib/voice/execute";
 import { saveVoiceMessage } from "@/lib/firebase/voiceChats";
@@ -45,6 +45,14 @@ export function useAria() {
   const abortRef = useRef<AbortController | null>(null);
   const pathnameRef = useRef(pathname);
   const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  // True while a turn is being processed — the session loop must not restart
+  // listening (or capture Aria's own TTS) until the turn fully settles.
+  const processingRef = useRef(false);
+  // Monotonic turn id so a barge-in's aborted turn can't clear `processingRef`
+  // out from under the turn that replaced it.
+  const turnRef = useRef(0);
+  // Last route we speculatively prefetched, to dedupe per session.
+  const prefetchRef = useRef<string | null>(null);
   pathnameRef.current = pathname;
 
   useEffect(() => {
@@ -90,6 +98,9 @@ export function useAria() {
       }
       const controller = new AbortController();
       abortRef.current = controller;
+      // Latch this turn so the session loop won't restart listening mid-turn.
+      const myTurn = ++turnRef.current;
+      processingRef.current = true;
       p.setSource("voice");
       p.setPhase("understanding");
       p.setIntent({
@@ -122,7 +133,9 @@ export function useAria() {
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
-          p.fail("Aria is unavailable right now.");
+          const msg = "Aria is unavailable right now.";
+          p.fail(msg);
+          speak(msg);
           return;
         }
         const reader = res.body.getReader();
@@ -178,6 +191,18 @@ export function useAria() {
             transcript,
           });
           speak(clean);
+        } else if (actionTypes.length === 0) {
+          // The model returned nothing usable AND took no action — never leave
+          // the user with silence. Acknowledge out loud so the loop feels alive.
+          const m = "Sorry, I didn't catch that — try again?";
+          usePresenceStore.getState().setIntent({
+            action: "unknown",
+            label: m,
+            confidence: toConfidence(0.5),
+            partial: false,
+            transcript,
+          });
+          speak(m);
         }
         historyRef.current = [
           ...historyRef.current,
@@ -196,10 +221,48 @@ export function useAria() {
       } catch (e) {
         // A barge-in abort is intentional — stay quiet.
         if (e instanceof DOMException && e.name === "AbortError") return;
-        usePresenceStore.getState().fail(e instanceof Error ? e.message : "Aria hit a snag.");
+        const msg = e instanceof Error ? e.message : "Aria hit a snag.";
+        usePresenceStore.getState().fail(msg);
+        speak(msg);
+      } finally {
+        // Only the turn that's still current may release the latch — a barge-in
+        // turn will have bumped turnRef, so the aborted turn leaves it alone.
+        if (turnRef.current === myTurn) processingRef.current = false;
       }
     },
     [user, router, gatherContext],
+  );
+
+  /**
+   * Speculative layer — the rule-based intent engine runs on every interim
+   * frame, but it CANNOT truly parse natural language, so it is allowed only
+   * side-effect-free, reversible moves. The streamed LLM directive stays the
+   * source of truth and corrects anything this guesses wrong.
+   *   1. prefetch the likely route (invisible; a wrong guess costs only a cache warm)
+   *   2. lean the ghost toward a nav anchor ONLY when highly confident
+   */
+  const speculate = useCallback(
+    (intent: PredictedIntent) => {
+      const route = intent.route;
+      if (!route) return;
+      if (prefetchRef.current !== route) {
+        prefetchRef.current = route;
+        try {
+          (router as { prefetch?: (href: string) => void }).prefetch?.(route);
+        } catch {
+          /* prefetch is best-effort */
+        }
+      }
+      if (intent.confidence.band !== "high") return;
+      const phase = usePresenceStore.getState().phase;
+      if (phase !== "listening" && phase !== "understanding") return;
+      const target = resolveTargetId(`nav:${route}`);
+      if (!target) return;
+      const p = usePresenceStore.getState();
+      p.setSource("voice");
+      p.setTarget(target); // soft lean only — no router.push, no commit
+    },
+    [router],
   );
 
   const listen = useCallback(() => {
@@ -216,18 +279,22 @@ export function useAria() {
     p.setPhase("listening");
     engine.start({
       onStart: () => usePresenceStore.getState().setPhase("listening"),
-      onPartial: (_intent, t) => {
+      onPartial: (intent, t) => {
         const st = usePresenceStore.getState();
         st.setIntent({ action: "unknown", label: t, confidence: toConfidence(0.4), partial: true, transcript: t });
+        speculate(intent);
       },
       onFinal: (_intent, t) => void run(t),
-      onError: (msg) => usePresenceStore.getState().fail(msg),
+      onError: (msg, fatal) => {
+        usePresenceStore.getState().fail(msg);
+        if (fatal) speak(msg);
+      },
       onEnd: () => {
         const st = usePresenceStore.getState();
         if (st.phase === "listening") st.setPhase("idle");
       },
     });
-  }, [run]);
+  }, [run, speculate]);
 
   const stopListening = useCallback(() => engineRef.current?.stop(), []);
 
@@ -246,13 +313,23 @@ export function useAria() {
         const s = usePresenceStore.getState();
         if (s.phase === "idle") s.setPhase("listening");
       },
-      onPartial: (_i, t) =>
+      onPartial: (intent, t) => {
         usePresenceStore
           .getState()
-          .setIntent({ action: "unknown", label: t, confidence: toConfidence(0.4), partial: true, transcript: t }),
+          .setIntent({ action: "unknown", label: t, confidence: toConfidence(0.4), partial: true, transcript: t });
+        speculate(intent);
+      },
       onFinal: (_i, t) => void run(t),
-      onError: () => {
-        /* transient (no-speech, etc.) — keep the session; onEnd restarts */
+      onError: (msg, fatal) => {
+        // Benign (no-speech / aborted) — keep the session; onEnd restarts.
+        // Fatal (mic blocked / no device) — tear the session down and say why,
+        // so we never loop silently on "listening".
+        if (!fatal) return;
+        sessionRef.current = false;
+        setActive(false);
+        const p = usePresenceStore.getState();
+        p.fail(msg);
+        speak(msg);
       },
       onEnd: () => {
         if (!sessionRef.current) {
@@ -260,19 +337,22 @@ export function useAria() {
           if (s.phase === "listening") s.setPhase("idle");
           return;
         }
-        // Echo-safe restart: wait until Aria finishes speaking, then listen again.
+        // Listen → think → speak → listen. Restart only once the turn has fully
+        // settled (not processing) AND Aria has stopped speaking, so we never
+        // clobber a turn or capture her own voice.
         const tryRestart = () => {
           if (!sessionRef.current) return;
-          if (typeof window !== "undefined" && window.speechSynthesis?.speaking) {
-            window.setTimeout(tryRestart, 300);
+          const speaking = typeof window !== "undefined" && !!window.speechSynthesis?.speaking;
+          if (processingRef.current || speaking) {
+            window.setTimeout(tryRestart, 250);
             return;
           }
           beginListen();
         };
-        window.setTimeout(tryRestart, 350);
+        window.setTimeout(tryRestart, 300);
       },
     });
-  }, [run]);
+  }, [run, speculate]);
 
   const startSession = useCallback(() => {
     if (!StreamingSpeechEngine.isSupported()) {

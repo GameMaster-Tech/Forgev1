@@ -356,6 +356,9 @@ export default function Sidebar({
           onClick={() => setCreateOpen((v) => !v)}
           aria-label="Create"
           aria-expanded={createOpen}
+          data-presence-id="action:create"
+          data-presence-label="Create"
+          data-presence-kind="button"
           className={`group relative w-full h-9 flex items-center transition-colors duration-150 ${
             createOpen ? "bg-violet/90" : "bg-violet hover:bg-violet/90"
           } text-white ${expanded ? "px-3 justify-start gap-2" : "justify-center"}`}
@@ -450,6 +453,9 @@ export default function Sidebar({
             <Link
               key={item.href}
               href={item.href}
+              data-presence-id={`nav:${item.href}`}
+              data-presence-label={item.label}
+              data-presence-kind="nav"
               className={`group relative flex items-center transition-colors duration-150 ${
                 expanded ? "px-2 py-1.5 gap-2.5" : "justify-center w-full h-9"
               } ${

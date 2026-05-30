@@ -29,6 +29,7 @@ export function GhostCursor() {
   const phase = usePresenceStore((s) => s.phase);
   const target = usePresenceStore((s) => s.target);
   const source = usePresenceStore((s) => s.source);
+  const clickPulse = usePresenceStore((s) => s.clickPulse);
   const label = usePresenceStore((s) => s.intent?.label ?? null);
 
   const visible = enabled && phase !== "idle";
@@ -77,6 +78,17 @@ export function GhostCursor() {
             animate={pulsing ? { scale: [1, 1.5, 1], opacity: [0.18, 0.04, 0.18] } : { scale: 1, opacity: 0.16 }}
             transition={pulsing ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
           />
+          {/* Click ripple — bumped via store.click() at each choreographed click */}
+          {clickPulse > 0 && (
+            <motion.span
+              key={clickPulse}
+              className="absolute left-1/2 top-1/2 rounded-full"
+              style={{ width: 18, height: 18, border: `2px solid ${color}`, x: "-50%", y: "-50%" }}
+              initial={{ scale: 0.5, opacity: 0.7 }}
+              animate={{ scale: 3.2, opacity: 0 }}
+              transition={{ duration: 0.45, ease: "easeOut" }}
+            />
+          )}
           {/* Core dot */}
           <span
             className="absolute left-1/2 top-1/2 rounded-full"

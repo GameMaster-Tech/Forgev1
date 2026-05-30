@@ -43,6 +43,10 @@ interface PresenceState {
   /** Who's driving — "voice" (Aria) gets its own cursor colour. */
   source: "system" | "voice";
   setSource: (source: "system" | "voice") => void;
+  /** Monotonic counter — bumped each time the ghost "clicks", so the cursor
+   *  can play a click ripple. Choreographer calls `click()`. */
+  clickPulse: number;
+  click: () => void;
 
   /* ── unified dispatch ── */
   apply: (event: PresenceEvent) => void;
@@ -71,6 +75,8 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   enabled: true,
   source: "system",
   setSource: (source) => set({ source }),
+  clickPulse: 0,
+  click: () => set((s) => ({ clickPulse: s.clickPulse + 1 })),
 
   apply: (event) =>
     set((s) => {
