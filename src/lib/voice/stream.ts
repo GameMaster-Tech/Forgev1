@@ -8,24 +8,12 @@
  * directive split across chunks is never mis-spoken.
  */
 
-import type { VoiceAction, VoiceActionType } from "./types";
+import { ALL_ACTION_TYPES, type VoiceAction, type VoiceActionType } from "./types";
 
 const OPENER = "<<do:";
 const CLOSER = ">>";
 
-const KNOWN: VoiceActionType[] = [
-  "navigate",
-  "open_project",
-  "open_document",
-  "create_project",
-  "create_document",
-  "create_team",
-  "delete",
-  "search",
-  "tempo_plan",
-  "answer",
-  "clarify",
-];
+const KNOWN: VoiceActionType[] = ALL_ACTION_TYPES;
 
 export interface ParseChunk {
   /** Clean speech text safe to display / speak now. */

@@ -147,6 +147,32 @@ export default function EditorPage({
     setResearchOpen((v) => !v);
   }, []);
 
+  // Aria bridge — let the voice agent toggle doc panels and edit the LIVE editor
+  // (collab-safe) on the document the user is viewing.
+  useEffect(() => {
+    const onUi = (e: Event) => {
+      const d = (e as CustomEvent<{ kind?: string; panel?: string; mode?: string; content?: string }>).detail;
+      if (!d) return;
+      if (d.kind === "doc_panel") {
+        if (d.panel === "research") openResearch();
+        else if (d.panel === "comments") openComments();
+        else if (d.panel === "related") openRelated();
+      } else if (d.kind === "edit" && typeof d.content === "string") {
+        const ed = editorHandleRef.current?.editor;
+        if (!ed) return;
+        const html = d.content
+          .split(/\n{2,}/)
+          .map((para) => `<p>${para.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>`)
+          .join("");
+        if (d.mode === "replace") ed.chain().focus().setContent(html).run();
+        else if (d.mode === "prepend") ed.chain().focus().setTextSelection(0).insertContent(html).run();
+        else ed.chain().focus().setTextSelection(ed.state.doc.content.size).insertContent(html).run();
+      }
+    };
+    window.addEventListener("aria:ui", onUi);
+    return () => window.removeEventListener("aria:ui", onUi);
+  }, [openResearch, openComments, openRelated]);
+
   useEffect(() => {
     if (user?.uid) fetchProjects(user.uid);
   }, [user?.uid, fetchProjects]);

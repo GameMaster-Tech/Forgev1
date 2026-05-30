@@ -12,8 +12,10 @@
 
 import { useEffect } from "react";
 import { Mic, MicOff } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useAria } from "@/hooks/useAria";
 import { usePresenceStore } from "@/store/presence";
+import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { GhostCursor } from "./GhostCursor";
 import { PresenceOverlay } from "./PresenceOverlay";
 import { ConfirmationPreview } from "./ConfirmationPreview";
@@ -22,8 +24,22 @@ export function PresenceLayer() {
   const { listen, supported } = useAria();
   const enabled = usePresenceStore((s) => s.enabled);
   const phase = usePresenceStore((s) => s.phase);
+  const { open: openPalette } = useCommandPalette();
+  const { setTheme } = useTheme();
 
   const listening = phase === "listening" || phase === "understanding";
+
+  // Aria UI bridge: client-only actions Aria can't run from the executor.
+  useEffect(() => {
+    const onUi = (e: Event) => {
+      const d = (e as CustomEvent<{ kind?: string; theme?: string }>).detail;
+      if (!d) return;
+      if (d.kind === "command_palette") openPalette();
+      else if (d.kind === "theme" && d.theme) setTheme(d.theme);
+    };
+    window.addEventListener("aria:ui", onUi);
+    return () => window.removeEventListener("aria:ui", onUi);
+  }, [openPalette, setTheme]);
 
   // Global shortcut: ⌘/Ctrl + Shift + V → start listening.
   useEffect(() => {
