@@ -43,6 +43,7 @@ export function FirstRunWelcome() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [topic, setTopic] = useState("");
 
   useEffect(() => {
     try {
@@ -69,17 +70,29 @@ export function FirstRunWelcome() {
     setBusy(true);
     setError(null);
     const access = await ensureMicAccess();
-    if (!access.ok) {
-      // Don't close — let the user fix the mic and retry with the exact guidance.
+    if (!access.ok && access.hardBlock) {
+      // Only a true environment block stops us; show the exact fix and let them retry.
       setError(access.message ?? "Microphone unavailable.");
       setBusy(false);
       return;
     }
-    speak("Hi, I'm Aria. Press F2 any time and just tell me what you'd like to do.");
+    const t = topic.trim();
+    speak(
+      t
+        ? `Hi, I'm Aria. Setting up your workspace for ${t} now.`
+        : "Hi, I'm Aria. Tell me what you'd like to do.",
+    );
     remember();
-    // Hand off into a live session (PresenceLayer's aria:ui bridge starts it).
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("aria:ui", { detail: { kind: "start_session" } }));
+      if (t) {
+        // Personalized cold start: Aria seeds a named project + welcome doc.
+        window.dispatchEvent(
+          new CustomEvent("aria:ui", { detail: { kind: "run", transcript: `Set up my workspace called ${t}` } }),
+        );
+      } else {
+        // Just go live — PresenceLayer's bridge starts the session.
+        window.dispatchEvent(new CustomEvent("aria:ui", { detail: { kind: "start_session" } }));
+      }
     }
     setBusy(false);
     setOpen(false);
@@ -153,6 +166,23 @@ export function FirstRunWelcome() {
                 ))}
               </div>
 
+              {/* Personalize — optional, seeds a named workspace */}
+              <div className="mt-5">
+                <label className="text-[10px] uppercase tracking-[0.16em] text-muted/70 font-semibold">
+                  What are you working on? <span className="normal-case tracking-normal text-muted/50">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void enableVoice();
+                  }}
+                  placeholder="e.g. my thesis, market research, a trip plan…"
+                  className="mt-1.5 w-full bg-foreground/[0.04] border border-border rounded-[0.375rem] px-3 py-2 text-[13px] text-foreground placeholder:text-muted/50 focus:outline-none focus:border-[color:var(--voice)] transition-colors"
+                />
+              </div>
+
               {error ? (
                 <div className="mt-4 text-[12px] text-rose bg-rose/[0.06] border border-rose/30 rounded-[0.375rem] px-3 py-2 leading-relaxed">
                   {error}
@@ -168,7 +198,13 @@ export function FirstRunWelcome() {
                   className="flex-1 inline-flex items-center justify-center gap-2 h-10 rounded-[0.375rem] bg-[color:var(--voice)] text-white text-[12.5px] font-semibold tracking-[0.01em] hover:opacity-90 active:scale-[0.99] transition disabled:opacity-60"
                 >
                   <Mic size={14} strokeWidth={2.25} />
-                  {busy ? "Enabling…" : error ? "Try again" : "Enable voice & say hello"}
+                  {busy
+                    ? "Enabling…"
+                    : error
+                      ? "Try again"
+                      : topic.trim()
+                        ? "Set up my workspace"
+                        : "Enable voice & say hello"}
                 </button>
                 <button
                   type="button"
