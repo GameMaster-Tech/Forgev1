@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
+import { onIdTokenChanged, signOut, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase/config";
 
 interface AuthContextValue {
@@ -40,9 +40,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (readE2EStub()) return;
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    // `onIdTokenChanged` fires on sign-in, sign-out, AND every silent
+    // token refresh (~hourly). Listening here — rather than the
+    // sign-in-only `onAuthStateChanged` — lets us keep the server-side
+    // `__session` cookie aligned with the live token, so long sessions
+    // and top-level OAuth navigations don't get spuriously 401'd.
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
       setUser(user);
       setLoading(false);
+
+      // Sync the HttpOnly session cookie with the current auth state.
+      // Best-effort: a failure here must never break the UI.
+      try {
+        if (user) {
+          const token = await user.getIdToken();
+          await fetch("/api/auth/session", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } else {
+          await fetch("/api/auth/session", { method: "DELETE" });
+        }
+      } catch {
+        /* offline / transient — the cookie just lags; Bearer still works */
+      }
+
       // Remember each successful sign-in so the multi-account
       // switcher can list this account on next render. Import is
       // dynamic so the SSR pass doesn't try to touch localStorage.
@@ -68,6 +90,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (window as unknown as Record<string, unknown>).__E2E_AUTH = undefined;
       setUser(null);
       return;
+    }
+    // Clear the server session cookie alongside the client sign-out so a
+    // stale cookie can't keep authenticating server routes.
+    try {
+      await fetch("/api/auth/session", { method: "DELETE" });
+    } catch {
+      /* best effort */
     }
     await signOut(auth);
   }, []);

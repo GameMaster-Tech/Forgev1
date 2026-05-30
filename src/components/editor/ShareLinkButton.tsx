@@ -12,23 +12,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Share2, Loader2, Copy, Check, ExternalLink } from "lucide-react";
-import { auth } from "@/lib/firebase/config";
+import { authedPostJson } from "@/lib/firebase/authed-fetch";
 
 interface ShareLinkButtonProps {
   documentId: string;
   /** Optional label override. Default "Share". */
   label?: string;
-}
-
-async function authHeaders(): Promise<Record<string, string>> {
-  const user = auth.currentUser;
-  if (!user) return {};
-  try {
-    const token = await user.getIdToken();
-    return { Authorization: `Bearer ${token}` };
-  } catch {
-    return {};
-  }
 }
 
 export function ShareLinkButton({ documentId, label = "Share" }: ShareLinkButtonProps) {
@@ -50,12 +39,7 @@ export function ShareLinkButton({ documentId, label = "Share" }: ShareLinkButton
        
       setError(null);
       try {
-        const headers = await authHeaders();
-        const res = await fetch("/api/share/mint", {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ documentId }),
-        });
+        const res = await authedPostJson("/api/share/mint", { documentId });
         if (!res.ok) {
           let detail = `Mint failed (${res.status})`;
           try {
