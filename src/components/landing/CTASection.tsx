@@ -1,107 +1,55 @@
 "use client";
 
-import { useRef } from "react";
+/**
+ * CTASection — closing call, mirroring the hero's dark voice stage so the page
+ * bookends on the same note: amber glow, one clear action.
+ */
+
 import Link from "next/link";
-import { motion, useInView } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { motion } from "framer-motion";
+import { ArrowRight, Mic } from "lucide-react";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
 export default function CTASection() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef, { once: true, margin: "-60px" });
-
   return (
-    <section
-      ref={sectionRef}
-      className="relative py-32 sm:py-40 bg-black dark:bg-surface overflow-hidden"
-    >
-      {/* Animated grid pattern */}
+    <section className="relative py-28 overflow-hidden" style={{ background: "#0A0812", color: "#F4F1EA" }}>
       <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(var(--violet) 1px, transparent 1px), linear-gradient(90deg, var(--violet) 1px, transparent 1px)",
-          backgroundSize: "60px 60px",
-        }}
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: "radial-gradient(80% 120% at 50% 0%, rgba(226,180,102,0.16), transparent 60%)" }}
       />
-
-      {/* Gradient wash */}
-      <div className="absolute top-0 left-0 w-full h-full">
-        <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-violet/[0.12] blur-[150px] pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/3 w-[400px] h-[400px] bg-cyan/[0.08] blur-[130px] pointer-events-none" />
-      </div>
-
-      <div className="relative max-w-4xl mx-auto px-6 text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 32 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, ease }}
-        >
-          {/* Social proof */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.4, ease, delay: 0.1 }}
-            className="flex items-center justify-center gap-3 mb-10"
+      <motion.div
+        initial={{ opacity: 0, y: 22 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-80px" }}
+        transition={{ duration: 0.6, ease }}
+        className="relative max-w-3xl mx-auto px-6 text-center"
+      >
+        <span className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: "#E2B466" }}>
+          Forge — the AI-voice-native workspace
+        </span>
+        <h2 className="mt-6 font-display font-black text-[clamp(2.2rem,5.5vw,4rem)] leading-[1.02] tracking-[-0.035em]">
+          Stop clicking.
+          <br />
+          <span style={{ fontStyle: "italic", fontWeight: 500, color: "#E2B466", fontFamily: "Georgia, 'Times New Roman', serif" }}>
+            Start saying.
+          </span>
+        </h2>
+        <p className="mt-6 text-[1.05rem] leading-relaxed mx-auto max-w-md" style={{ color: "rgba(244,241,234,0.6)" }}>
+          Your workspace, driven by your voice. Set it up in seconds — Aria takes it from there.
+        </p>
+        <div className="mt-9 flex items-center justify-center gap-3.5">
+          <Link
+            href="/auth/signup"
+            className="group inline-flex items-center gap-2.5 rounded-[0.5rem] px-7 py-3.5 text-[15px] font-semibold transition-transform active:scale-[0.98]"
+            style={{ background: "#E2B466", color: "#0A0812", boxShadow: "0 14px 40px -12px rgba(226,180,102,0.6)" }}
           >
-            {/* Stacked avatars */}
-            <div className="flex -space-x-2">
-              {[
-                "bg-violet",
-                "bg-cyan",
-                "bg-warm",
-                "bg-green",
-              ].map((color, i) => (
-                <div
-                  key={i}
-                  className={`w-7 h-7 ${color} border-2 border-black dark:border-surface flex items-center justify-center`}
-                >
-                  <span className="text-[8px] font-bold text-white">
-                    {["RK", "JD", "AL", "MS"][i]}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <span className="text-sm text-white/50 dark:text-muted">
-              Join 2,000+ researchers
-            </span>
-          </motion.div>
-
-          {/* Headline */}
-          <h2 className="font-display font-extrabold text-5xl sm:text-6xl lg:text-7xl text-white dark:text-foreground leading-[1.05] tracking-[-0.03em] mb-8">
-            Where research
-            <br />
-            <span className="bg-gradient-to-r from-violet-light via-cyan to-violet-light bg-clip-text text-transparent bg-[length:200%_auto] animate-gradient">
-              begins.
-            </span>
-          </h2>
-
-          <p className="text-lg text-white/40 dark:text-muted max-w-lg mx-auto leading-relaxed mb-12">
-            The tools researchers use today were built for a different era.
-            Forge is built for what&apos;s possible now.
-          </p>
-
-          {/* CTA */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
-              href="/auth/signup"
-              className="group relative flex items-center gap-3 bg-violet text-white px-10 py-5 text-lg font-semibold overflow-hidden btn-glow-violet"
-            >
-              <span className="relative z-10">Get started free</span>
-              <ArrowRight
-                size={18}
-                className="relative z-10 group-hover:translate-x-1 transition-transform duration-200"
-              />
-            </Link>
-          </div>
-
-          {/* Fine print */}
-          <p className="text-xs text-white/25 dark:text-muted/50 mt-6">
-            14-day free trial. No credit card required. Cancel anytime.
-          </p>
-        </motion.div>
-      </div>
+            <Mic size={16} strokeWidth={2.5} />
+            Get started — free
+            <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
+          </Link>
+        </div>
+      </motion.div>
     </section>
   );
 }
