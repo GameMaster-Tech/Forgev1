@@ -12,6 +12,7 @@
 
 import { useEffect } from "react";
 import { MicOff } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "next-themes";
 import { useAria } from "@/hooks/useAria";
 import { AriaIcon } from "./AriaIcon";
@@ -25,10 +26,33 @@ export function PresenceLayer() {
   const { listen, run, toggleSession, active, supported } = useAria();
   const enabled = usePresenceStore((s) => s.enabled);
   const phase = usePresenceStore((s) => s.phase);
+  const error = usePresenceStore((s) => s.error);
   const { open: openPalette } = useCommandPalette();
   const { setTheme } = useTheme();
 
   const listening = phase === "listening" || phase === "understanding";
+
+  // Persistent voice status so users always know whether Aria is on / working /
+  // blocked — never a silent mystery.
+  const statusLabel =
+    phase === "error"
+      ? error
+        ? error.length > 30
+          ? `${error.slice(0, 30)}…`
+          : error
+        : "Voice issue"
+      : phase === "listening"
+        ? "Listening…"
+        : phase === "understanding"
+          ? "Thinking…"
+          : phase === "navigating" || phase === "executing"
+            ? "Working…"
+            : phase === "confirming"
+              ? "Confirm?"
+              : active
+                ? "Aria · on"
+                : null;
+  const errored = phase === "error";
 
   // Aria UI bridge: client-only actions Aria can't run from the executor.
   useEffect(() => {
@@ -70,19 +94,51 @@ export function PresenceLayer() {
       <ConfirmationPreview />
 
       {enabled && supported && (
-        <button
-          type="button"
-          onClick={() => toggleSession()}
-          aria-label={active ? "Aria is listening — press F2 to stop" : "Talk to Aria (F2)"}
-          title={active ? "Aria is listening · F2 to stop" : "Talk to Aria · F2"}
-          className={`hidden md:flex fixed bottom-5 right-5 z-[60] w-12 h-12 items-center justify-center rounded-full border transition-all active:scale-95 ${
-            active || listening
-              ? "border-[color:var(--voice)] text-[color:var(--voice)] bg-[color:color-mix(in_srgb,var(--voice)_12%,var(--background))] shadow-[0_0_0_4px_color-mix(in_srgb,var(--voice)_24%,transparent)]"
-              : "bg-background/90 backdrop-blur-md border-border text-muted hover:text-[color:var(--voice)] hover:border-[color:color-mix(in_srgb,var(--voice)_45%,var(--border))] shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
-          }`}
-        >
-          <AriaIcon size={20} active={active || listening} />
-        </button>
+        <div className="hidden md:flex fixed bottom-5 right-5 z-[60] items-center gap-2">
+          <AnimatePresence>
+            {statusLabel && (
+              <motion.div
+                key="aria-status"
+                initial={{ opacity: 0, x: 8, scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 8, scale: 0.96 }}
+                transition={{ duration: 0.16 }}
+                className="flex items-center gap-2 h-8 rounded-full border bg-background/90 backdrop-blur-md px-3 shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
+                style={{
+                  borderColor: errored
+                    ? "color-mix(in srgb, var(--rose) 45%, var(--border))"
+                    : "color-mix(in srgb, var(--voice) 40%, var(--border))",
+                }}
+              >
+                <motion.span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: errored ? "var(--rose)" : "var(--voice)" }}
+                  animate={listening ? { opacity: [1, 0.3, 1] } : { opacity: 1 }}
+                  transition={listening ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+                />
+                <span
+                  className="text-[11px] font-medium whitespace-nowrap"
+                  style={{ color: errored ? "var(--rose)" : "var(--voice)" }}
+                >
+                  {statusLabel}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <button
+            type="button"
+            onClick={() => toggleSession()}
+            aria-label={active ? "Aria is listening — press F2 to stop" : "Talk to Aria (F2)"}
+            title={active ? "Aria is listening · F2 to stop" : "Talk to Aria · F2"}
+            className={`flex w-12 h-12 items-center justify-center rounded-full border transition-all active:scale-95 ${
+              active || listening
+                ? "border-[color:var(--voice)] text-[color:var(--voice)] bg-[color:color-mix(in_srgb,var(--voice)_12%,var(--background))] shadow-[0_0_0_4px_color-mix(in_srgb,var(--voice)_24%,transparent)]"
+                : "bg-background/90 backdrop-blur-md border-border text-muted hover:text-[color:var(--voice)] hover:border-[color:color-mix(in_srgb,var(--voice)_45%,var(--border))] shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
+            }`}
+          >
+            <AriaIcon size={20} active={active || listening} />
+          </button>
+        </div>
       )}
       {enabled && !supported && (
         <span className="sr-only">
