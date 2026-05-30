@@ -36,6 +36,10 @@
   --violet: #4338CA;
   --violet-light: #818CF8;
 
+  /* Aria — the voice agent's own cursor colour. An elegant warm amber, clearly
+     distinct from the cool indigo so you always know when Aria is acting. */
+  --voice: #B5832F;
+
   /* Sidebar — deep indigo-charcoal. Softer than pure obsidian: a touch of
      blue reads as calm/focused (not heavy), and the violet-leaning active
      state ties it to the brand accent. Lifted text for restful legibility. */
@@ -97,6 +101,9 @@
   /* Primary — luminous indigo in dark mode (calmer than the old bright blue) */
   --violet: #6366F1;
   --violet-light: #A5B4FC;
+
+  /* Aria voice cursor — warmer gold in dark mode. */
+  --voice: #E2B466;
 
   /* Sidebar — deep indigo-charcoal (calmer than pure black, violet-leaning). */
   --sidebar: #121220;

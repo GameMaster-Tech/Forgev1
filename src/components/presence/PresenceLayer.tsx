@@ -12,14 +12,14 @@
 
 import { useEffect } from "react";
 import { Mic, MicOff } from "lucide-react";
-import { usePresenceController } from "@/hooks/usePresenceController";
+import { useAria } from "@/hooks/useAria";
 import { usePresenceStore } from "@/store/presence";
 import { GhostCursor } from "./GhostCursor";
 import { PresenceOverlay } from "./PresenceOverlay";
 import { ConfirmationPreview } from "./ConfirmationPreview";
 
 export function PresenceLayer() {
-  const { listen, supported } = usePresenceController();
+  const { listen, supported } = useAria();
   const enabled = usePresenceStore((s) => s.enabled);
   const phase = usePresenceStore((s) => s.phase);
 

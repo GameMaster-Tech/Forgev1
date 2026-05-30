@@ -28,10 +28,12 @@ export function GhostCursor() {
   const enabled = usePresenceStore((s) => s.enabled);
   const phase = usePresenceStore((s) => s.phase);
   const target = usePresenceStore((s) => s.target);
+  const source = usePresenceStore((s) => s.source);
   const label = usePresenceStore((s) => s.intent?.label ?? null);
 
   const visible = enabled && phase !== "idle";
-  const color = PHASE_COLOR[phase];
+  // Aria (voice) gets its own elegant cursor colour; system actions follow phase.
+  const color = source === "voice" && phase !== "error" ? "var(--voice)" : PHASE_COLOR[phase];
 
   const pos = useMemo(() => {
     if (target) {

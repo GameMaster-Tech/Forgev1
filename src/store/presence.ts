@@ -35,9 +35,14 @@ interface PresenceState {
   trail: TrailAction[];
   /** The pending confirmation, if any (one at a time, by design — calm). */
   confirmation: ConfirmationRequest | null;
+  /** The most recent confirmation resolution — lets awaiters learn the decision. */
+  lastResolved: { id: string; decision: ConfirmationDecision } | null;
   error: string | null;
   /** Whether the presence layer is enabled (user can mute it). */
   enabled: boolean;
+  /** Who's driving — "voice" (Aria) gets its own cursor colour. */
+  source: "system" | "voice";
+  setSource: (source: "system" | "voice") => void;
 
   /* ── unified dispatch ── */
   apply: (event: PresenceEvent) => void;
@@ -61,8 +66,11 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   target: null,
   trail: [],
   confirmation: null,
+  lastResolved: null,
   error: null,
   enabled: true,
+  source: "system",
+  setSource: (source) => set({ source }),
 
   apply: (event) =>
     set((s) => {
@@ -88,7 +96,11 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
           return { confirmation: event.request, phase: "confirming" };
         case "confirm.resolve":
           return s.confirmation?.id === event.id
-            ? { confirmation: null, phase: event.decision === "confirm" ? "executing" : "idle" }
+            ? {
+                confirmation: null,
+                lastResolved: { id: event.id, decision: event.decision },
+                phase: event.decision === "confirm" ? "executing" : "idle",
+              }
             : s;
         case "error":
           return { phase: "error", error: event.message };
