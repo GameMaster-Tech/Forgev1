@@ -28,6 +28,7 @@ import {
 } from "@/hooks/useCommandPalette";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
+import { useDocsStore } from "@/store/docs";
 import { getUserDocuments, type FirestoreDocument } from "@/lib/firebase/firestore";
 
 const MAX_DOCS = 80;
@@ -74,7 +75,14 @@ export function useGlobalDocSearch() {
     }
     getUserDocuments(uid, MAX_DOCS)
       .then((list) => {
-        if (!cancelled) setDocs(list);
+        if (cancelled) return;
+        setDocs(list);
+        // Mirror into the docs store so Aria can resolve docs by name.
+        useDocsStore.getState().setDocs(
+          list
+            .filter((d) => typeof d.projectId === "string" && d.projectId)
+            .map((d) => ({ id: d.id, title: d.title?.trim() || "Untitled document", projectId: d.projectId })),
+        );
       })
       .catch(() => {
         if (!cancelled) setDocs([]);

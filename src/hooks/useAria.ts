@@ -15,6 +15,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
 import { usePresenceStore } from "@/store/presence";
+import { useDocsStore } from "@/store/docs";
 import { toConfidence, type PredictedIntent } from "@/lib/presence/types";
 import { StreamingSpeechEngine, ensureMicAccess } from "@/lib/presence/audio";
 import { spatialTracker, resolveTargetId } from "@/lib/presence/spatial";
@@ -105,12 +106,19 @@ export function useAria() {
     // What the user is actually looking at — the main content area.
     const main = typeof document !== "undefined" ? document.getElementById("main-content") : null;
     const visibleText = main?.innerText?.replace(/\s+/g, " ").trim().slice(0, 3000) ?? null;
+    // Documents the user owns — so Aria can resolve "open the launch doc" etc.
+    // Bias toward the current project, then fill with the rest.
+    const allDocs = useDocsStore.getState().docs;
+    const recentDocs = [
+      ...allDocs.filter((d) => d.projectId === currentProjectId),
+      ...allDocs.filter((d) => d.projectId !== currentProjectId),
+    ].slice(0, 20);
     return {
       route,
       currentProjectId,
       currentDocId,
       projects,
-      recentDocs: [],
+      recentDocs,
       selection: selId ? { id: selId, label: "", kind: "" } : null,
       textSelection: sc.textSelection,
       visibleText,
