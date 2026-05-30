@@ -153,7 +153,7 @@ export class StreamingSpeechEngine {
     return getCtor() !== null;
   }
 
-  start(handlers: SpeechHandlers) {
+  start(handlers: SpeechHandlers, opts: { continuous?: boolean } = {}) {
     if (this.active) return;
     const Ctor = getCtor();
     if (!Ctor) {
@@ -162,39 +162,42 @@ export class StreamingSpeechEngine {
     }
     const rec = new Ctor();
     rec.lang = "en-US";
-    rec.continuous = false;
+    // Continuous keeps the recognizer alive across pauses + turns (no per-turn
+    // restart gap) — used for the hands-free session. One-shot push-to-talk
+    // stays non-continuous so it ends cleanly after a single utterance.
+    rec.continuous = opts.continuous ?? false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
 
-    // Per-utterance bookkeeping so we never lose a trailing phrase.
-    let lastTranscript = "";
-    let firedFinal = false;
+    // The latest uncommitted interim — promoted to a final on end if the
+    // recognizer stopped before finalizing (Chrome does this on a trailing
+    // pause), so an utterance is never silently dropped.
+    let pendingInterim = "";
 
     rec.onstart = () => {
       this.active = true;
-      lastTranscript = "";
-      firedFinal = false;
+      pendingInterim = "";
       handlers.onStart?.();
     };
 
     rec.onresult = (e) => {
-      // Accumulate the best transcript across all results in this utterance.
-      let transcript = "";
-      let isFinal = false;
-      for (let i = 0; i < e.results.length; i++) {
+      // Echo guard: ignore anything captured while Aria is speaking — in a
+      // continuous session the live mic would otherwise transcribe her own TTS.
+      if (typeof window !== "undefined" && window.speechSynthesis?.speaking) return;
+      // Walk only the NEW results (resultIndex onward) so continuous mode emits
+      // each finalized phrase once instead of re-concatenating the whole session.
+      for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        transcript += r[0]?.transcript ?? "";
-        if (r.isFinal) isFinal = true;
-      }
-      transcript = normalizeTranscript(transcript);
-      if (!transcript) return;
-      lastTranscript = transcript;
-      const intent = predictIntent(transcript, !isFinal);
-      if (isFinal) {
-        firedFinal = true;
-        handlers.onFinal?.(intent, transcript);
-      } else {
-        handlers.onPartial?.(intent, transcript);
+        const raw = r[0]?.transcript ?? "";
+        if (r.isFinal) {
+          const t = normalizeTranscript(raw);
+          pendingInterim = "";
+          if (t) handlers.onFinal?.(predictIntent(t, false), t);
+        } else {
+          const t = normalizeTranscript(raw);
+          pendingInterim = t;
+          if (t) handlers.onPartial?.(predictIntent(t, true), t);
+        }
       }
     };
 
@@ -207,13 +210,10 @@ export class StreamingSpeechEngine {
     rec.onend = () => {
       this.active = false;
       this.rec = null;
-      // Finalize-on-end: Chrome routinely ends recognition on a trailing
-      // pause *before* emitting a final result, silently dropping the
-      // utterance. If that happened, promote the last partial to a final so
-      // the turn actually runs instead of vanishing into a restart loop.
-      if (!firedFinal && lastTranscript.length > 1) {
-        firedFinal = true;
-        const t = normalizeTranscript(lastTranscript);
+      // Promote a trailing interim that never got finalized.
+      if (pendingInterim.length > 1) {
+        const t = pendingInterim;
+        pendingInterim = "";
         handlers.onFinal?.(predictIntent(t, false), t);
       }
       handlers.onEnd?.();

@@ -398,21 +398,21 @@ export function useAria() {
           if (s.phase === "listening") s.setPhase("idle");
           return;
         }
-        // Listen → think → speak → listen. Restart only once the turn has fully
-        // settled (not processing) AND Aria has stopped speaking, so we never
-        // clobber a turn or capture her own voice.
+        // Continuous mode normally only ends on an idle timeout / transient
+        // error — bring it straight back (echo is guarded inside onresult),
+        // once any in-flight turn + TTS have settled.
         const tryRestart = () => {
           if (!sessionRef.current) return;
           const speaking = typeof window !== "undefined" && !!window.speechSynthesis?.speaking;
           if (processingRef.current || speaking) {
-            window.setTimeout(tryRestart, 250);
+            window.setTimeout(tryRestart, 200);
             return;
           }
           beginListen();
         };
-        window.setTimeout(tryRestart, 300);
+        window.setTimeout(tryRestart, 150);
       },
-    });
+    }, { continuous: true });
   }, [run, speculate]);
 
   const startSession = useCallback(() => {
