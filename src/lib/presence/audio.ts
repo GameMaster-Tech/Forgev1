@@ -58,17 +58,15 @@ export interface SpeechHandlers {
 }
 
 /**
- * Obtain (or verify) microphone permission, with precise diagnostics.
+ * Obtain (or verify) microphone permission. `getUserMedia` is the SOURCE OF
+ * TRUTH — if it resolves, the mic works, full stop. We never block on the
+ * Permissions API "denied" state, because it lags behind a fresh grant (the
+ * cause of "I allowed it but it's still blocked"). The Permissions state is read
+ * only to enrich a failure message. Diagnostics are logged so the exact cause is
+ * visible in the console.
  *
- * Per Chrome's permission model, a mic in the "denied"/blocked state will NEVER
- * re-prompt — `getUserMedia` just rejects instantly. Same for an embedded iframe
- * with no `allow="microphone"` policy, and for non-secure origins (a LAN IP over
- * HTTP). So before we call `getUserMedia` (which is what actually shows the
- * prompt when the state is "prompt"), we read the Permissions API to tell the
- * user the exact thing to change instead of looping silently on "listening".
- *
- * On success we immediately release the stream — SpeechRecognition opens its own
- * mic; we only wanted the grant.
+ * On success we release the stream and pause briefly so SpeechRecognition can
+ * grab the device cleanly (they contend for the same mic).
  */
 export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string }> {
   if (typeof window === "undefined") return { ok: false, message: "Voice is only available in the browser." };
@@ -80,9 +78,10 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
       return true; // cross-origin frame access threw → we're framed
     }
   })();
+  const secure = window.isSecureContext;
 
-  // Non-secure origin: the browser blocks mic capture and won't prompt.
-  if (!window.isSecureContext) {
+  if (!secure) {
+    console.warn("[aria-mic] insecure context", { origin: window.location?.origin, inIframe });
     return {
       ok: false,
       message:
@@ -92,6 +91,7 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
 
   const md = navigator.mediaDevices;
   if (!md?.getUserMedia) {
+    console.warn("[aria-mic] mediaDevices unavailable", { inIframe });
     return {
       ok: false,
       message: inIframe
@@ -100,28 +100,24 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
     };
   }
 
-  // Read the current state so we can explain a blocked mic — which never prompts.
+  // Read state for diagnostics ONLY — never to block.
+  let permState: string | undefined;
   try {
-    const status = await navigator.permissions?.query({ name: "microphone" as PermissionName });
-    if (status?.state === "denied") {
-      return {
-        ok: false,
-        message: inIframe
-          ? "Microphone is blocked in this preview frame. Open Forge in a normal browser tab and allow the mic."
-          : "Microphone is blocked for Forge — Chrome won't pop up again once blocked. Click the tune/lock icon at the left of the address bar → Microphone → Allow, then reload.",
-      };
-    }
+    permState = (await navigator.permissions?.query({ name: "microphone" as PermissionName }))?.state;
   } catch {
-    /* Permissions API unsupported for "microphone" — fall through to getUserMedia. */
+    /* Permissions API unsupported for "microphone" — fine */
   }
 
-  // State is "prompt" or "granted": getUserMedia shows the prompt (if needed).
   try {
     const stream = await md.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
+    // Let the device free up before SpeechRecognition opens its own capture.
+    await new Promise((r) => setTimeout(r, 150));
+    console.info("[aria-mic] granted", { permState, inIframe });
     return { ok: true };
   } catch (err) {
     const name = (err as { name?: string }).name ?? "";
+    console.warn("[aria-mic] getUserMedia failed", { name, permState, inIframe, secure });
     if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
       return {
         ok: false,
@@ -133,7 +129,10 @@ export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string
     if (name === "NotFoundError" || name === "DevicesNotFoundError") {
       return { ok: false, message: "No microphone found — plug one in and try again." };
     }
-    return { ok: false, message: "Couldn't access the microphone. Check your browser's mic permissions." };
+    if (name === "NotReadableError" || name === "TrackStartError") {
+      return { ok: false, message: "Your microphone is in use by another app. Close it (Zoom/Meet/etc.) and try again." };
+    }
+    return { ok: false, message: `Couldn't access the microphone (${name || "unknown error"}). Check your browser's mic permissions.` };
   }
 }
 
@@ -191,6 +190,7 @@ export class StreamingSpeechEngine {
     };
 
     rec.onerror = (e) => {
+      console.warn("[aria-speech] recognition error:", e.error);
       const { message, fatal } = classifySpeechError(e.error);
       handlers.onError?.(message, fatal);
     };
@@ -243,8 +243,16 @@ export class StreamingSpeechEngine {
 function classifySpeechError(code: string): { message: string; fatal: boolean } {
   switch (code) {
     case "not-allowed":
+      // The mic device permission was refused.
+      return { message: "Microphone is blocked. Allow it via the address-bar icon, then reload.", fatal: true };
     case "service-not-allowed":
-      return { message: "Microphone access was blocked. Enable it to use voice.", fatal: true };
+      // NOT the device — Chrome's online speech *service* is unavailable. Happens
+      // in some Chromium builds (Brave/Edge), offline, or on non-secure origins.
+      return {
+        message:
+          "Chrome's speech service isn't available here. Use Google Chrome, make sure you're online, and open Forge on http://localhost or HTTPS.",
+        fatal: true,
+      };
     case "audio-capture":
       return { message: "No microphone found.", fatal: true };
     case "no-speech":
@@ -253,8 +261,8 @@ function classifySpeechError(code: string): { message: string; fatal: boolean } 
     case "aborted":
       return { message: "Listening stopped.", fatal: false };
     case "network":
-      return { message: "Speech service is unreachable right now.", fatal: false };
+      return { message: "Speech service is unreachable — check your connection.", fatal: false };
     default:
-      return { message: "Voice input hit a snag — try again.", fatal: false };
+      return { message: `Voice input hit a snag (${code || "unknown"}) — try again.`, fatal: false };
   }
 }
