@@ -15,6 +15,7 @@ import { useGlobalDocSearch } from "@/hooks/useGlobalDocSearch";
 import { KeyboardShortcuts } from "@/components/app/KeyboardShortcuts";
 import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PresenceLayer } from "@/components/presence/PresenceLayer";
 import { Search } from "lucide-react";
 
 /**
@@ -88,6 +89,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <CommandPalette />
       <KeyboardShortcuts />
       <Tutorial />
+      {/* AI Presence Layer — ghost cursor + intent overlay + confirmation. */}
+      <PresenceLayer />
     </div>
   );
 }
