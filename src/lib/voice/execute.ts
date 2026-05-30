@@ -23,6 +23,7 @@ import {
 } from "@/lib/firebase/firestore";
 import { usePresenceStore } from "@/store/presence";
 import { choreographClick } from "./choreograph";
+import { queueDocWrite } from "./handoff";
 import type { ConfirmationDecision } from "@/lib/presence/types";
 import type { VoiceAction } from "./types";
 
@@ -161,7 +162,9 @@ export async function executeDirective(
       if (!pid) return void p.fail("I need a project to put that document in.");
       return track(`Creating "${action.title}"`, "executing", async () => {
         const docId = await createDocument(deps.user.uid, pid, action.title);
-        if (action.content) await updateDocument(docId, { content: toHtml(action.content) });
+        // Hand the body to the doc page so it types it into the LIVE editor
+        // (collab/Y.Doc-safe + visible) instead of pasting into Firestore.
+        if (action.content) queueDocWrite(docId, action.content, "append");
         deps.router.push(`/project/${pid}/doc/${docId}`);
       });
     }

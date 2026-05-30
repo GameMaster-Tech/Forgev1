@@ -33,6 +33,7 @@ import { DocumentOutline } from "@/components/editor/DocumentOutline";
 import { RelatedDocsPanel } from "@/components/editor/RelatedDocsPanel";
 import { useDocComments } from "@/hooks/useDocComments";
 import { useCollaborativeDoc } from "@/hooks/useCollaborativeDoc";
+import { takeDocWrite, typeInto } from "@/lib/voice/handoff";
 import { toastError } from "@/lib/toast";
 import type { Editor } from "@tiptap/react";
 
@@ -160,13 +161,9 @@ export default function EditorPage({
       } else if (d.kind === "edit" && typeof d.content === "string") {
         const ed = editorHandleRef.current?.editor;
         if (!ed) return;
-        const html = d.content
-          .split(/\n{2,}/)
-          .map((para) => `<p>${para.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>`)
-          .join("");
-        if (d.mode === "replace") ed.chain().focus().setContent(html).run();
-        else if (d.mode === "prepend") ed.chain().focus().setTextSelection(0).insertContent(html).run();
-        else ed.chain().focus().setTextSelection(ed.state.doc.content.size).insertContent(html).run();
+        // Type it in visibly on the live (collab) editor.
+        const mode = d.mode === "replace" ? "replace" : d.mode === "prepend" ? "prepend" : "append";
+        void typeInto(ed, d.content, mode);
       }
     };
     window.addEventListener("aria:ui", onUi);
@@ -176,6 +173,16 @@ export default function EditorPage({
   useEffect(() => {
     if (user?.uid) fetchProjects(user.uid);
   }, [user?.uid, fetchProjects]);
+
+  // Aria handoff — if the voice agent created this doc with a body, type it into
+  // the live editor once it's mounted AND the Y.Doc has synced (so we write into
+  // the shared collaborative state, not a copy that's about to be overwritten).
+  useEffect(() => {
+    if (!editor) return;
+    if (ydoc && !collabSynced) return;
+    const queued = takeDocWrite(docId);
+    if (queued) void typeInto(editor, queued.content, queued.mode);
+  }, [editor, collabSynced, ydoc, docId]);
 
   useEffect(() => {
     let cancelled = false;
