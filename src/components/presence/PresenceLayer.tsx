@@ -10,8 +10,8 @@
  * voice goes through `listen()`.
  */
 
-import { useEffect } from "react";
-import { MicOff } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MicOff, HelpCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "next-themes";
 import { useAria } from "@/hooks/useAria";
@@ -21,6 +21,7 @@ import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { GhostCursor } from "./GhostCursor";
 import { PresenceOverlay } from "./PresenceOverlay";
 import { ConfirmationPreview } from "./ConfirmationPreview";
+import { VoiceCheatSheet } from "./VoiceCheatSheet";
 
 export function PresenceLayer() {
   const { listen, run, toggleSession, active, supported } = useAria();
@@ -29,6 +30,7 @@ export function PresenceLayer() {
   const error = usePresenceStore((s) => s.error);
   const { open: openPalette } = useCommandPalette();
   const { setTheme } = useTheme();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const listening = phase === "listening" || phase === "understanding";
 
@@ -63,6 +65,7 @@ export function PresenceLayer() {
       else if (d.kind === "theme" && d.theme) setTheme(d.theme);
       else if (d.kind === "start_session" && !active) toggleSession();
       else if (d.kind === "run" && typeof d.transcript === "string") void run(d.transcript);
+      else if (d.kind === "voice_help") setHelpOpen(true);
     };
     window.addEventListener("aria:ui", onUi);
     return () => window.removeEventListener("aria:ui", onUi);
@@ -87,14 +90,38 @@ export function PresenceLayer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [supported, listen, toggleSession]);
 
+  // "?" anywhere (outside inputs) opens the voice cheat-sheet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "?") return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      e.preventDefault();
+      setHelpOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <>
       <GhostCursor />
       <PresenceOverlay />
       <ConfirmationPreview />
+      <VoiceCheatSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {enabled && supported && (
         <div className="hidden md:flex fixed bottom-5 right-5 z-[60] items-center gap-2">
+          {/* What can I say? — discoverability */}
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            aria-label="What can I say to Aria? (?)"
+            title="What can I say to Aria? · ?"
+            className="flex w-8 h-8 items-center justify-center rounded-full border border-border bg-background/90 backdrop-blur-md text-muted hover:text-[color:var(--voice)] hover:border-[color:color-mix(in_srgb,var(--voice)_45%,var(--border))] transition-colors shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
+          >
+            <HelpCircle size={15} strokeWidth={2} />
+          </button>
           <AnimatePresence>
             {statusLabel && (
               <motion.div
