@@ -186,7 +186,7 @@ export class StreamingSpeechEngine {
         transcript += r[0]?.transcript ?? "";
         if (r.isFinal) isFinal = true;
       }
-      transcript = transcript.trim();
+      transcript = normalizeTranscript(transcript);
       if (!transcript) return;
       lastTranscript = transcript;
       const intent = predictIntent(transcript, !isFinal);
@@ -213,7 +213,8 @@ export class StreamingSpeechEngine {
       // the turn actually runs instead of vanishing into a restart loop.
       if (!firedFinal && lastTranscript.length > 1) {
         firedFinal = true;
-        handlers.onFinal?.(predictIntent(lastTranscript, false), lastTranscript);
+        const t = normalizeTranscript(lastTranscript);
+        handlers.onFinal?.(predictIntent(t, false), t);
       }
       handlers.onEnd?.();
     };
@@ -247,6 +248,15 @@ export class StreamingSpeechEngine {
   get isActive() {
     return this.active;
   }
+}
+
+/** Tidy a raw transcript: collapse whitespace, trim, capitalize the first
+ *  letter. Web Speech finals lack leading capitals/clean spacing — this gives
+ *  the model (and the on-screen label) a cleaner, more accurate-looking input. */
+function normalizeTranscript(raw: string): string {
+  const s = raw.replace(/\s+/g, " ").trim();
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function classifySpeechError(code: string): { message: string; fatal: boolean } {

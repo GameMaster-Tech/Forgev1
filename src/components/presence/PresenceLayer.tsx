@@ -125,19 +125,56 @@ export function PresenceLayer() {
               </motion.div>
             )}
           </AnimatePresence>
-          <button
-            type="button"
-            onClick={() => toggleSession()}
-            aria-label={active ? "Aria is listening — press F2 to stop" : "Talk to Aria (F2)"}
-            title={active ? "Aria is listening · F2 to stop" : "Talk to Aria · F2"}
-            className={`flex w-12 h-12 items-center justify-center rounded-full border transition-all active:scale-95 ${
-              active || listening
-                ? "border-[color:var(--voice)] text-[color:var(--voice)] bg-[color:color-mix(in_srgb,var(--voice)_12%,var(--background))] shadow-[0_0_0_4px_color-mix(in_srgb,var(--voice)_24%,transparent)]"
-                : "bg-background/90 backdrop-blur-md border-border text-muted hover:text-[color:var(--voice)] hover:border-[color:color-mix(in_srgb,var(--voice)_45%,var(--border))] shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
-            }`}
-          >
-            <AriaIcon size={20} active={active || listening} />
-          </button>
+          <div className="relative flex items-center justify-center">
+            {/* Sonar pulses radiating while Aria is live/listening */}
+            <AnimatePresence>
+              {(active || listening) && (
+                <>
+                  <motion.span
+                    key="pulse-1"
+                    className="absolute rounded-full pointer-events-none"
+                    style={{ width: 48, height: 48, border: "2px solid var(--voice)" }}
+                    initial={{ scale: 0.9, opacity: 0.45 }}
+                    animate={{ scale: 1.7, opacity: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+                  />
+                  <motion.span
+                    key="pulse-2"
+                    className="absolute rounded-full pointer-events-none"
+                    style={{ width: 48, height: 48, border: "2px solid var(--voice)" }}
+                    initial={{ scale: 0.9, opacity: 0.45 }}
+                    animate={{ scale: 1.7, opacity: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut", delay: 0.8 }}
+                  />
+                </>
+              )}
+            </AnimatePresence>
+            <motion.button
+              type="button"
+              onClick={() => toggleSession()}
+              aria-label={active ? "Aria is listening — press F2 to stop" : "Talk to Aria (F2)"}
+              title={active ? "Aria is listening · F2 to stop" : "Talk to Aria · F2"}
+              animate={
+                active || listening
+                  ? { scale: [1, 1.06, 1] }
+                  : { scale: 1 }
+              }
+              transition={
+                active || listening
+                  ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" }
+                  : { duration: 0.2 }
+              }
+              className={`relative flex w-12 h-12 items-center justify-center rounded-full border transition-colors active:scale-95 ${
+                active || listening
+                  ? "border-[color:var(--voice)] text-[color:var(--voice)] bg-[color:color-mix(in_srgb,var(--voice)_12%,var(--background))] shadow-[0_0_0_4px_color-mix(in_srgb,var(--voice)_24%,transparent)]"
+                  : "bg-background/90 backdrop-blur-md border-border text-muted hover:text-[color:var(--voice)] hover:border-[color:color-mix(in_srgb,var(--voice)_45%,var(--border))] shadow-[0_10px_28px_-12px_rgba(0,0,0,0.5)]"
+              }`}
+            >
+              <AriaIcon size={20} active={active || listening} />
+            </motion.button>
+          </div>
         </div>
       )}
       {enabled && !supported && (

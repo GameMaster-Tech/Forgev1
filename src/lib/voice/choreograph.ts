@@ -29,10 +29,12 @@ import type { PresencePhase, PresenceTarget } from "@/lib/presence/types";
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Beat durations (ms). Kept short so Aria feels quick, not performative. */
-const TRAVEL_MS = 360; // matches the GhostCursor spring settle time
-const DWELL_MS = 110; // pause on arrival, before the click
-const CLICK_MS = 150; // let the click ripple read before moving on
+/** Beat durations (ms). Tight on purpose — the real action fires right after the
+ *  click beat, so these directly gate how soon the UI updates vs. Aria's speech.
+ *  Kept just long enough to read as "travel → click", not as a delay. */
+const TRAVEL_MS = 190; // the GhostCursor spring is fast; don't wait for full settle
+const DWELL_MS = 40; // brief pause on arrival
+const CLICK_MS = 70; // let the click ripple register, then act
 
 function centerTarget(label?: string): PresenceTarget {
   const w = typeof window !== "undefined" ? window.innerWidth : 1280;

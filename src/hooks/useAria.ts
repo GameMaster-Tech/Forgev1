@@ -21,6 +21,7 @@ import { StreamingSpeechEngine, ensureMicAccess } from "@/lib/presence/audio";
 import { spatialTracker, resolveTargetId } from "@/lib/presence/spatial";
 import { DirectiveParser } from "@/lib/voice/stream";
 import { executeDirective, type ExecDeps } from "@/lib/voice/execute";
+import { getIntendedRoute, clearIntendedRoute } from "@/lib/voice/navState";
 import { saveVoiceMessage } from "@/lib/firebase/voiceChats";
 import type { VoiceContext } from "@/lib/voice/types";
 
@@ -94,9 +95,17 @@ export function useAria() {
     };
   }, [user, router]);
 
+  // When the real route finally commits, drop the optimistic override so we
+  // always trust reality once it has caught up (or diverged via manual nav).
+  useEffect(() => {
+    clearIntendedRoute();
+  }, [pathname]);
+
   const gatherContext = useCallback((): VoiceContext => {
     const projects = useProjectsStore.getState().projects.map((p) => ({ id: p.id, name: p.name }));
-    const route = pathnameRef.current ?? "/";
+    // Prefer where Aria just navigated (router.push lags usePathname) so chained
+    // directives reason about the destination, not the route we're leaving.
+    const route = getIntendedRoute() ?? pathnameRef.current ?? "/";
     const docMatch = route.match(/\/project\/([^/]+)\/doc\/([^/]+)/);
     const projMatch = route.match(/\/project\/([^/]+)/);
     const currentProjectId = docMatch?.[1] ?? projMatch?.[1] ?? null;

@@ -26,8 +26,14 @@ export function AriaIcon({
       className={className}
       aria-hidden
     >
-      {/* Core presence */}
-      <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+      {/* Core presence — breathes gently when active */}
+      <motion.circle
+        cx="12"
+        cy="12"
+        fill="currentColor"
+        animate={active ? { r: [2.6, 3.15, 2.6] } : { r: 2.6 }}
+        transition={active ? { duration: 1.8, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+      />
       {/* Inner arcs */}
       <path d="M7.8 8.4a6.2 6.2 0 0 0 0 7.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.9" />
       <path d="M16.2 8.4a6.2 6.2 0 0 1 0 7.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" opacity="0.9" />

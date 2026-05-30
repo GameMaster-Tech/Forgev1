@@ -24,6 +24,7 @@ import {
 import { usePresenceStore } from "@/store/presence";
 import { choreographClick } from "./choreograph";
 import { queueDocWrite } from "./handoff";
+import { setIntendedRoute } from "./navState";
 import type { ConfirmationDecision } from "@/lib/presence/types";
 import type { VoiceAction } from "./types";
 
@@ -90,6 +91,9 @@ function dispatchUi(detail: Record<string, unknown>) {
 }
 function navTo(route: string, label: string, deps: ExecDeps): void {
   const p = usePresenceStore.getState();
+  // Record the destination NOW so any follow-up directive reasons against where
+  // we're going — not the route the UI hasn't finished leaving yet.
+  setIntendedRoute(route);
   const id = p.startAction({ label: `Opening ${label}`, phase: "navigating" });
   // Walk the ghost to the matching sidebar anchor and "click" it before the
   // route actually changes. If no anchor is mounted the choreographer parks at
@@ -163,6 +167,7 @@ export async function executeDirective(
       return track(`Creating "${action.name}"`, "executing", async () => {
         const pid = await createProject(deps.user.uid, { name: action.name, mode: "reasoning", systemInstructions: "" });
         created.set(action.name.trim().toLowerCase(), pid);
+        setIntendedRoute(`/project/${pid}`);
         deps.router.push(`/project/${pid}`);
       });
     case "create_document": {
@@ -173,6 +178,7 @@ export async function executeDirective(
         // Hand the body to the doc page so it types it into the LIVE editor
         // (collab/Y.Doc-safe + visible) instead of pasting into Firestore.
         if (action.content) queueDocWrite(docId, action.content, "append");
+        setIntendedRoute(`/project/${pid}/doc/${docId}`);
         deps.router.push(`/project/${pid}/doc/${docId}`);
       });
     }
@@ -184,6 +190,7 @@ export async function executeDirective(
         const docId = await createDocument(deps.user.uid, pid, "Welcome to Forge");
         // Aria types the welcome in on the doc page (visible + collab-safe).
         queueDocWrite(docId, WELCOME_BODY, "append");
+        setIntendedRoute(`/project/${pid}/doc/${docId}`);
         deps.router.push(`/project/${pid}/doc/${docId}`);
       });
     case "create_team":
