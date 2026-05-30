@@ -57,6 +57,86 @@ export interface SpeechHandlers {
   onEnd?: () => void;
 }
 
+/**
+ * Obtain (or verify) microphone permission, with precise diagnostics.
+ *
+ * Per Chrome's permission model, a mic in the "denied"/blocked state will NEVER
+ * re-prompt — `getUserMedia` just rejects instantly. Same for an embedded iframe
+ * with no `allow="microphone"` policy, and for non-secure origins (a LAN IP over
+ * HTTP). So before we call `getUserMedia` (which is what actually shows the
+ * prompt when the state is "prompt"), we read the Permissions API to tell the
+ * user the exact thing to change instead of looping silently on "listening".
+ *
+ * On success we immediately release the stream — SpeechRecognition opens its own
+ * mic; we only wanted the grant.
+ */
+export async function ensureMicAccess(): Promise<{ ok: boolean; message?: string }> {
+  if (typeof window === "undefined") return { ok: false, message: "Voice is only available in the browser." };
+
+  const inIframe = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true; // cross-origin frame access threw → we're framed
+    }
+  })();
+
+  // Non-secure origin: the browser blocks mic capture and won't prompt.
+  if (!window.isSecureContext) {
+    return {
+      ok: false,
+      message:
+        "Voice needs a secure connection. Open Forge at http://localhost:3000 (not a 192.168.x.x address) or over HTTPS.",
+    };
+  }
+
+  const md = navigator.mediaDevices;
+  if (!md?.getUserMedia) {
+    return {
+      ok: false,
+      message: inIframe
+        ? "The preview frame can't use the microphone. Open Forge in a normal browser tab."
+        : "This browser can't access the microphone (mediaDevices unavailable).",
+    };
+  }
+
+  // Read the current state so we can explain a blocked mic — which never prompts.
+  try {
+    const status = await navigator.permissions?.query({ name: "microphone" as PermissionName });
+    if (status?.state === "denied") {
+      return {
+        ok: false,
+        message: inIframe
+          ? "Microphone is blocked in this preview frame. Open Forge in a normal browser tab and allow the mic."
+          : "Microphone is blocked for Forge — Chrome won't pop up again once blocked. Click the tune/lock icon at the left of the address bar → Microphone → Allow, then reload.",
+      };
+    }
+  } catch {
+    /* Permissions API unsupported for "microphone" — fall through to getUserMedia. */
+  }
+
+  // State is "prompt" or "granted": getUserMedia shows the prompt (if needed).
+  try {
+    const stream = await md.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+    return { ok: true };
+  } catch (err) {
+    const name = (err as { name?: string }).name ?? "";
+    if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
+      return {
+        ok: false,
+        message: inIframe
+          ? "Microphone blocked in the preview frame. Open Forge in a normal browser tab to allow it."
+          : "Microphone is blocked. Click the tune/lock icon in the address bar → Microphone → Allow, then reload — Chrome won't prompt again once blocked.",
+      };
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      return { ok: false, message: "No microphone found — plug one in and try again." };
+    }
+    return { ok: false, message: "Couldn't access the microphone. Check your browser's mic permissions." };
+  }
+}
+
 export class StreamingSpeechEngine {
   private rec: SpeechRecognitionLike | null = null;
   private active = false;

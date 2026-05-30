@@ -16,7 +16,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useProjectsStore } from "@/store/projects";
 import { usePresenceStore } from "@/store/presence";
 import { toConfidence, type PredictedIntent } from "@/lib/presence/types";
-import { StreamingSpeechEngine } from "@/lib/presence/audio";
+import { StreamingSpeechEngine, ensureMicAccess } from "@/lib/presence/audio";
 import { spatialTracker, resolveTargetId } from "@/lib/presence/spatial";
 import { DirectiveParser } from "@/lib/voice/stream";
 import { executeDirective, type ExecDeps } from "@/lib/voice/execute";
@@ -266,9 +266,17 @@ export function useAria() {
   );
 
   const listen = useCallback(() => {
+    void (async () => {
     const p = usePresenceStore.getState();
     if (!StreamingSpeechEngine.isSupported()) {
       p.fail("Voice isn't supported in this browser.");
+      return;
+    }
+    const access = await ensureMicAccess();
+    if (!access.ok) {
+      const m = access.message ?? "Microphone unavailable.";
+      p.fail(m);
+      speak(m);
       return;
     }
     const engine = engineRef.current ?? new StreamingSpeechEngine();
@@ -294,6 +302,7 @@ export function useAria() {
         if (st.phase === "listening") st.setPhase("idle");
       },
     });
+    })();
   }, [run, speculate]);
 
   const stopListening = useCallback(() => engineRef.current?.stop(), []);
@@ -355,14 +364,26 @@ export function useAria() {
   }, [run, speculate]);
 
   const startSession = useCallback(() => {
-    if (!StreamingSpeechEngine.isSupported()) {
-      usePresenceStore.getState().fail("Voice isn't supported in this browser.");
-      return;
-    }
-    if (sessionRef.current) return;
-    sessionRef.current = true;
-    setActive(true);
-    beginListen();
+    void (async () => {
+      const p = usePresenceStore.getState();
+      if (!StreamingSpeechEngine.isSupported()) {
+        p.fail("Voice isn't supported in this browser.");
+        return;
+      }
+      if (sessionRef.current) return;
+      // Make sure we actually have the mic (and surface a fix if not) BEFORE we
+      // flip the session on — otherwise it would loop on "listening".
+      const access = await ensureMicAccess();
+      if (!access.ok) {
+        const m = access.message ?? "Microphone unavailable.";
+        p.fail(m);
+        speak(m);
+        return;
+      }
+      sessionRef.current = true;
+      setActive(true);
+      beginListen();
+    })();
   }, [beginListen]);
 
   const stopSession = useCallback(() => {
