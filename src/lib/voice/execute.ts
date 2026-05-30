@@ -25,6 +25,7 @@ import { usePresenceStore } from "@/store/presence";
 import { choreographClick } from "./choreograph";
 import { queueDocWrite } from "./handoff";
 import { setIntendedRoute } from "./navState";
+import { getLastDoc } from "./lastVisited";
 import type { ConfirmationDecision } from "@/lib/presence/types";
 import type { VoiceAction } from "./types";
 
@@ -154,6 +155,12 @@ export async function executeDirective(
       const pid = action.projectId ?? deps.currentProjectId;
       if (!action.docId || !pid) return void p.fail("I couldn't locate that document.");
       navTo(`/project/${pid}/doc/${action.docId}`, action.title ?? "document", deps);
+      return;
+    }
+    case "open_last": {
+      const last = getLastDoc();
+      if (!last) return void p.fail("I don't have anything recent to reopen yet.");
+      navTo(`/project/${last.projectId}/doc/${last.docId}`, last.title || "your last document", deps);
       return;
     }
     case "open_team": {

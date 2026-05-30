@@ -32,6 +32,7 @@ export type VoiceAction =
   | { type: "open_project_graph"; projectId?: string; name?: string }
   | { type: "open_project_planner"; projectId?: string; name?: string }
   | { type: "open_document"; docId?: string; projectId?: string; title?: string }
+  | { type: "open_last" }
   | { type: "open_team"; teamId?: string; name?: string }
   /* ── create ── */
   | { type: "create_project"; name: string }
@@ -71,6 +72,7 @@ export const ALL_ACTION_TYPES: VoiceActionType[] = [
   "open_project_graph",
   "open_project_planner",
   "open_document",
+  "open_last",
   "open_team",
   "create_project",
   "create_document",

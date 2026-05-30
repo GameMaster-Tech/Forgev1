@@ -34,6 +34,7 @@ import { RelatedDocsPanel } from "@/components/editor/RelatedDocsPanel";
 import { useDocComments } from "@/hooks/useDocComments";
 import { useCollaborativeDoc } from "@/hooks/useCollaborativeDoc";
 import { takeDocWrite, typeInto } from "@/lib/voice/handoff";
+import { recordLastDoc } from "@/lib/voice/lastVisited";
 import { toastError } from "@/lib/toast";
 import type { Editor } from "@tiptap/react";
 
@@ -198,6 +199,8 @@ export default function EditorPage({
           setEditorHtml(doc.content || "");
           setWordCount(doc.wordCount);
           setCitationCount(doc.citationCount);
+          // Remember this as the "continue where you left off" target.
+          recordLastDoc({ projectId, docId, title: doc.title });
         } else {
           // Doc genuinely doesn't exist (deleted / bad link) — show an
           // explicit empty/error surface instead of a blank editor.

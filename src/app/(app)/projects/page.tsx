@@ -30,6 +30,7 @@ import { useProjectsStore, type ResearchMode, type Project } from "@/store/proje
 import { useAuth } from "@/context/AuthContext";
 import NewProjectModal from "@/components/app/NewProjectModal";
 import { TrySaying } from "@/components/onboarding/TrySaying";
+import { ResumeCard } from "@/components/onboarding/ResumeCard";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -135,6 +136,7 @@ export default function ProjectsPage() {
       <div className="grid grid-cols-12 gap-x-0">
         {/* Main column */}
         <div className="col-span-12 lg:col-span-8 px-6 sm:px-10 pb-16 lg:border-r lg:border-border">
+          <ResumeCard className="mt-6" />
           {loading ? (
             <div className="flex items-center justify-center py-32">
               <Loader2 size={20} className="animate-spin text-muted" />

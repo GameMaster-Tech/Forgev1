@@ -41,6 +41,7 @@ Action TYPEs and params (you can do ANYTHING a user can do in Forge):
   open_project_graph  {"projectId"?:string,"name"?:string}
   open_project_planner{"projectId"?:string,"name"?:string}
   open_document       {"docId"?:string,"projectId"?:string,"title"?:string}
+  open_last           {}                  // resume the last document the user worked on ("open the last thing I worked on", "resume", "continue where I left off")
   open_team           {"teamId"?:string,"name"?:string}
   create_project      {"name":string}
   create_document     {"title":string,"projectId"?:string,"projectName"?:string,"content"?:string}
