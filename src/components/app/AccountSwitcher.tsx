@@ -203,40 +203,44 @@ export function AccountSwitcher({ expanded }: AccountSwitcherProps) {
                     Switch account
                   </div>
                   {others.map((a) => (
-                    <button
+                    <div
                       key={a.uid}
-                      type="button"
-                      onClick={() => void switchTo(a)}
-                      disabled={busy}
-                      className="group/row w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+                      className="group/row relative w-full flex items-center hover:bg-white/[0.06] transition-colors"
                     >
-                      <div className="w-7 h-7 bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-semibold font-display tabular-nums text-background/80">
-                          {(a.displayName ?? a.email)
-                            .split(/[ @]/)
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)
-                            .toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[12px] text-background truncate">
-                          {a.displayName ?? "Account"}
+                      <button
+                        type="button"
+                        onClick={() => void switchTo(a)}
+                        disabled={busy}
+                        className="min-w-0 flex-1 flex items-center gap-2.5 px-3 py-2 text-left disabled:opacity-50"
+                      >
+                        <div className="w-7 h-7 bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0">
+                          <span className="text-[9px] font-semibold font-display tabular-nums text-background/80">
+                            {(a.displayName ?? a.email)
+                              .split(/[ @]/)
+                              .map((n) => n[0])
+                              .join("")
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </span>
                         </div>
-                        <div className="text-[10px] text-background/55 truncate">
-                          {a.email}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] text-background truncate">
+                            {a.displayName ?? "Account"}
+                          </div>
+                          <div className="text-[10px] text-background/55 truncate">
+                            {a.email}
+                          </div>
                         </div>
-                      </div>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => forget(a.uid, e)}
                         aria-label={`Forget ${a.email}`}
-                        className="opacity-0 group-hover/row:opacity-100 text-background/50 hover:text-background transition-opacity p-1"
+                        className="opacity-0 group-hover/row:opacity-100 text-background/50 hover:text-background transition-opacity p-1 pr-3 shrink-0"
                       >
                         <X size={11} strokeWidth={2} />
                       </button>
-                    </button>
+                    </div>
                   ))}
                 </div>
               ) : null}
