@@ -22,7 +22,7 @@ import { PresenceOverlay } from "./PresenceOverlay";
 import { ConfirmationPreview } from "./ConfirmationPreview";
 
 export function PresenceLayer() {
-  const { listen, toggleSession, active, supported } = useAria();
+  const { listen, run, toggleSession, active, supported } = useAria();
   const enabled = usePresenceStore((s) => s.enabled);
   const phase = usePresenceStore((s) => s.phase);
   const { open: openPalette } = useCommandPalette();
@@ -33,15 +33,16 @@ export function PresenceLayer() {
   // Aria UI bridge: client-only actions Aria can't run from the executor.
   useEffect(() => {
     const onUi = (e: Event) => {
-      const d = (e as CustomEvent<{ kind?: string; theme?: string }>).detail;
+      const d = (e as CustomEvent<{ kind?: string; theme?: string; transcript?: string }>).detail;
       if (!d) return;
       if (d.kind === "command_palette") openPalette();
       else if (d.kind === "theme" && d.theme) setTheme(d.theme);
       else if (d.kind === "start_session" && !active) toggleSession();
+      else if (d.kind === "run" && typeof d.transcript === "string") void run(d.transcript);
     };
     window.addEventListener("aria:ui", onUi);
     return () => window.removeEventListener("aria:ui", onUi);
-  }, [openPalette, setTheme, active, toggleSession]);
+  }, [openPalette, setTheme, active, toggleSession, run]);
 
   // Shortcuts:
   //   F2            — single press toggles Aria's continuous voice session

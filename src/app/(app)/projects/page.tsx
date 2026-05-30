@@ -29,6 +29,7 @@ import {
 import { useProjectsStore, type ResearchMode, type Project } from "@/store/projects";
 import { useAuth } from "@/context/AuthContext";
 import NewProjectModal from "@/components/app/NewProjectModal";
+import { TrySaying } from "@/components/onboarding/TrySaying";
 
 const ease = [0.22, 0.61, 0.36, 1] as const;
 
@@ -360,6 +361,16 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         Create first project
         <ArrowRight size={12} strokeWidth={2} className="ml-1" />
       </button>
+
+      {/* …or just ask Aria. One click runs it. */}
+      <TrySaying
+        className="mt-9"
+        prompts={[
+          "Create a project called Market Research",
+          "Start a project about my thesis",
+          "Set up my workspace",
+        ]}
+      />
     </div>
   );
 }
